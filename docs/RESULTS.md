@@ -1,0 +1,44 @@
+# Result schema and fair measurement
+
+The controller produces `manifest.json`, `records.jsonl` and per-instance JSON
+records. Local progress files and worker logs assist resume/debugging but are not
+published. All times use a monotonic clock.
+
+| Field | Meaning |
+| --- | --- |
+| `outcome` | `optimal_certified`, `feasible_budget_end`, `no_verified_feasible`, `memory_limit`, `host_memory_low`, `host_memory_check_failed`, or `error` |
+| `has_verified_feasible` | At least one candidate was fully checked before the deadline |
+| `best_cardinality` | Smallest eligible candidate cardinality, or null |
+| `first_feasible_total_s` | Time from worker launch reference to first fully checked candidate |
+| `best_total_s` | Time to the best eligible cardinality |
+| `trace` | Improving cardinality/time pairs, without diagnosis members |
+| `lower_bound` | Internally justified lower bound, not an externally supplied optimum |
+| `own_optimality_certificate` | Best verified cardinality equals a justified internal lower bound |
+| `optimality_certificate_total_s` | Time at which the internal matching-bound certificate was established |
+| `process_wall_s` | Controller-observed elapsed worker-process time |
+| `budget_overrun_s` | Process wall time beyond the deadline; late witnesses are excluded |
+| `preprocessing_s` | Model loading and transformations |
+| `input_audit_s` | Native LP parser equivalence checks |
+| `original_variables` | Scalar variables before reductions |
+| `generated_variables` | Free scalar variables after the selected reductions |
+| `constraints` | Residual constraints, including added conflict constraints |
+| `max_resident_group_variables` | Largest individual search group |
+| `peak_rss_mib` | Sampled RSS summed over worker and native children |
+| `native_invocations` | Native search rounds; preprocessing-only solves can have zero |
+| `invalid_candidate_count` | Native witnesses rejected by exact checks |
+
+Some fields appear only after the corresponding phase finishes. Interrupted
+workers may have partial records. An optimum certificate is distinct from
+reaching a post-hoc reference optimum, and no external reference target is used
+in this release. Null fields mean unavailable, not zero.
+
+Do not average only successful runs. Treat timeouts as censored, compare
+cardinality at common time budgets, and report certificate rates separately.
+Keep each method's parsing, compilation and reuse policy explicit. Compare both
+cold full-flow and amortized online costs when a fixed circuit has many
+observations. Peak memory is the main space metric; integer and Boolean variable
+counts are supplementary and do not represent equal storage cost.
+
+This repository contains no final cross-method performance claims or historical
+development records. Publishing final experimental tables requires a separate
+frozen campaign and its provenance.

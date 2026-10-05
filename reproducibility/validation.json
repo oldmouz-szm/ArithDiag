@@ -1,0 +1,39 @@
+{
+  "project": "ArithDiag",
+  "version": "0.1.0",
+  "verified_utc": "2026-10-05T15:14:52.661505+00:00",
+  "purpose": "Source-release validation, not a final benchmark performance campaign",
+  "python": "Python 3.14.4",
+  "compiler": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+  "correctness": {
+    "passed": true,
+    "toy_models": 128,
+    "toy_feasible_witnesses": 3336,
+    "conflict_soundness_checks": 1024,
+    "transform_checks": 384,
+    "partial_bus_regression": true,
+    "all_initial_candidates_exact": true,
+    "elapsed_s": 2.1000105010007246
+  },
+  "native": {
+    "passed": true,
+    "input_audits": 4,
+    "exact_witness_checks": 6
+  },
+  "external_dataset": {
+    "tag": "v1.0.0",
+    "representative_circuits_audited": 10,
+    "observations_audited": 10,
+    "largest_components": 8128,
+    "checks": "Model construction, transformations, exact initialization and bound sanity"
+  },
+  "smoke": {
+    "instances": 4,
+    "method_instance_runs": 12,
+    "verified_feasible_runs": 12,
+    "deadline_terminated_runs": 3,
+    "native_search_runs": 8,
+    "peak_process_group_rss_mib": 51.35546875
+  },
+  "final_450_performance_campaign_included": false
+}

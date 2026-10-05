@@ -1,0 +1,45 @@
+{
+  "project": "ArithDiag",
+  "version": "0.1.0",
+  "upstream": {
+    "name": "LS-IQCQP",
+    "url": "https://github.com/INFORMSJoC/2025.1178",
+    "commit": "d41da7f2cb1dbd03f3cf18c8508bb82080383a51",
+    "license": "MIT",
+    "source_sha256": {
+      "call.cpp": "a43e8024100aa9753de1684419effb7bce9f3bc51301979f86303231e9b603e0",
+      "ls_no_cons.cpp": "8a9794736cae5af4f904f10deaf781fe424849933593dbb4a7c929771d57aa7f",
+      "ls_bin.cpp": "45a40d02bc3052e4756ca87c079bc523743551908f6d04d55ddb4baa278e81ff",
+      "ls_read.cpp": "106a747c80095429e16379396e9b90295a3154040aef214cb6994bd44b0e7f42",
+      "util.h": "dc420ed702ff5514bb4ebaa791d479fb137b777502b7d200b266e6bc69814ef7",
+      "ls_mix_not_dis.cpp": "36452484b069087c03b8684f064ed06d8102134398b4ffe51f45743b88bd6077",
+      "component.cpp": "c43613755003e0e42b9145bb8dbd8afb8baa65ac2cec2ccadf63bf0f9ab2881a",
+      "sol.h": "e06dd77d0864a3addbc4dbe72564072524840412fdb9930a114cada495dfee70",
+      "ls_balance.cpp": "ebc489a97b7e55a8eb3ad3d821c88a59f143b8df402e6b73c8dc8f550652c599"
+    }
+  },
+  "benchmark": {
+    "url": "https://github.com/oldmouz-szm/MBD-Benchmark",
+    "tag": "v1.0.0",
+    "commit": "f6da7a31f5b60d490b68e9a3902a297f0df3b234",
+    "instances": 450
+  },
+  "algorithm_policy": {
+    "stagnation_s": 3,
+    "restart_round_caps_s": [
+      5,
+      10,
+      15
+    ],
+    "component_move_every_steps": 64,
+    "component_trials_per_call": 4,
+    "finite_factor_domain_span": 4096,
+    "partial_divisor_scan_cap": 20000,
+    "conflict_shrink_checks": 64,
+    "conflict_shrink_max_components": 16,
+    "seed_conflict_analysis_cap_s": 0.35,
+    "dynamic_conflict_analysis_cap_s": 0.1,
+    "conflict_cache_max": 128
+  },
+  "external_reference_stopping": false
+}

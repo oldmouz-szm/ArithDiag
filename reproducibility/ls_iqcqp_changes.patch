@@ -1,0 +1,430 @@
+--- upstream/src/LS-IQCQP/call.cpp
++++ native/ls-iqcqp/call.cpp
+@@ -1,50 +1,76 @@
+-#include <stdio.h>
+ #include "sol.h"
+-int main(int argc,char *argv[]) // pri
+-{
+-    int flag = 2;
+-    if (flag == 0)
+-    {
+-        solver::qp_solver * ls_qp_solver = new solver::qp_solver;
+-        //读入文件和时间参数
+-        ls_qp_solver->read(argv[2]);
+-        ls_qp_solver->_cut_off = std::atof(argv[1]);
+-        ls_qp_solver->print_lp_formula(true);
+-        // ls_qp_solver->print_lp_formula(true);
+-        exit(0);//第一次
++#include <limits>
++namespace solver {
++string mbd_num(Float x) {
++    std::ostringstream stream;
++    if(std::isfinite(x) && std::floor(x)==x) stream<<std::fixed<<std::setprecision(0)<<x;
++    else stream<<std::setprecision(std::numeric_limits<Float>::max_digits10)<<x;
++    return stream.str();
++}
++void qp_solver::mbd_emit() {
++    if(!mbd_trace || _best_assignment.size()!=_vars.size() || _best_object_value>=mbd_last_emitted) return;
++    auto start=std::chrono::steady_clock::now();
++    mbd_last_emitted=_best_object_value;
++    cout << "\nMBDTRACE {\"kind\":\"incumbent\",\"solver_s\":" << std::setprecision(17) << TimeElapsed()
++         << ",\"objective\":\"" << mbd_num(_best_object_value+_obj_constant)
++         << "\",\"values\":{";
++    for(size_t j=0;j<_vars.size();j++) {
++        if(j)cout<<",";
++        cout << "\"" << _vars[j].name << "\":\"" << mbd_num(_best_assignment[j]) << "\"";
+     }
+-    else if (flag == 1)
+-    {
+-        solver::qp_solver * ls_qp_solver = new solver::qp_solver;
+-        //读入文件和时间参数
+-        ls_qp_solver->read(argv[2]);
+-        ls_qp_solver->_cut_off = std::atof(argv[1]);
+-        // ls_qp_solver->seed_num = std::atoi(argv[3]);
+-        //读入初始解
+-        ls_qp_solver->read_init_solution(argv[3]); // 接收lp全文格式的初始解
+-        // exit(0);
+-        ls_qp_solver->local_search();
+-        // // cout << endl;
+-        // freopen(argv[5], "w", stdout);
+-        // ls_qp_solver->print_best_solution();
+-        // fclose(stdout);
+-        // ls_qp_solver->print_best_solution();
++    cout << "}}" << endl;
++    mbd_trace_overhead += std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
++}
++void qp_solver::mbd_dump() {
++    cout << std::setprecision(std::numeric_limits<Float>::max_digits10) << "{\"variables\":[";
++    for(size_t i=0;i<_vars.size();i++) {
++        auto &v=_vars[i];if(i)cout<<",";
++        cout<<"{\"name\":\""<<v.name<<"\",\"type\":\""<<(v.is_bin?"binary":v.is_int?"integer":"continuous")
++            <<"\",\"lb\":\""<<mbd_num(v.lower)<<"\",\"ub\":\""<<mbd_num(v.upper)<<"\"}";
+     }
+-    else if (flag == 2)
+-    {
+-        solver::qp_solver * ls_qp_solver = new solver::qp_solver;
+-        ls_qp_solver->read(argv[3]);
+-        ls_qp_solver->_cut_off = std::atof(argv[1]);
+-        // ls_qp_solver->print_formula();
+-        ls_qp_solver->tabu_switch = std::atoi(argv[2]);
+-        // cout << "tabu_switch" << ls_qp_solver->tabu_switch << endl;
+-        if (ls_qp_solver->tabu_switch == 1)
+-        {
+-            // cout << "tabu_switch" << endl;
+-            ls_qp_solver->set_constraint_tabu_enabled(true);
++    cout << "],\"constraints\":[";
++    for(size_t i=0;i<_constraints.size();i++) {
++        auto &c=_constraints[i];if(i)cout<<",";
++        cout<<"{\"name\":\""<<c.name<<"\",\"sense\":\""<<(c.is_equal?"eq":c.is_less?"le":"ge")
++            <<"\",\"rhs\":\""<<mbd_num(c.bound)<<"\",\"monomials\":[";
++        for(size_t j=0;j<c.monomials.size();j++){
++            auto &m=c.monomials[j];if(j)cout<<",";
++            cout<<"{\"coef\":\""<<mbd_num(m.coeff)<<"\",\"vars\":[";
++            for(size_t k=0;k<m.m_vars.size();k++){if(k)cout<<",";cout<<"\""<<_vars[m.m_vars[k]].name<<"\"";}
++            if(!m.is_linear && !m.is_multilinear)cout<<",\""<<_vars[m.m_vars[0]].name<<"\"";
++            cout<<"]}";
+         }
+-        ls_qp_solver->local_search();
+-        // ls_qp_solver->print_best_solution();
++        cout<<"]}";
+     }
++    cout<<"],\"objective\":[";
++    for(size_t j=0;j<_object_monoials.size();j++){
++        auto &m=_object_monoials[j];if(j)cout<<",";
++        cout<<"{\"coef\":\""<<mbd_num(m.coeff)<<"\",\"vars\":[";
++        for(size_t k=0;k<m.m_vars.size();k++){if(k)cout<<",";cout<<"\""<<_vars[m.m_vars[k]].name<<"\"";}
++        cout<<"]}";
++    }
++    cout<<"],\"float_mantissa_bits\":"<<std::numeric_limits<Float>::digits<<"}"<<endl;
+ }
+-
++}
++int main(int argc,char **argv) {
++    if(argc==3 && string(argv[1])=="--audit") {
++        solver::qp_solver q;q.read(argv[2]);q.mbd_dump();return 0;
++    }
++    if(argc==6 && string(argv[1])=="--component-probe"){
++        solver::qp_solver q;q.read(argv[2]);q.seed_num=std::atoi(argv[4]);std::srand(q.seed_num);q.caiq_load(argv[3]);q.mbd_trace=true;
++        q._start_time=std::chrono::steady_clock::now();q.sta_cons();q.caiq_initialise();q.restart_by_new_solution();
++        for(int i=0;i<std::atoi(argv[5]);i++){q._steps=i;q.caiq_step();}
++        q.mbd_emit();
++        cout<<"\nCAIQPROBE "<<q.caiq_attempts<<" "<<q.caiq_accepted<<endl;return 0;
++    }
++    if(argc<4){std::cerr<<"cutoff tabu filename [seed] [trace]\n";return 2;}
++    solver::qp_solver q;
++    q.read(argv[3]);q._cut_off=std::atof(argv[1]);q.tabu_switch=std::atoi(argv[2]);
++    q.seed_num=argc>4?std::atoi(argv[4]):1;
++    q.mbd_trace=argc>5 && std::atoi(argv[5])!=0;
++    std::srand(q.seed_num);
++    if(q.tabu_switch)q.set_constraint_tabu_enabled(true);
++    if(argc>6 && string(argv[6])!="none")q.caiq_load(argv[6]);
++    q.local_search();q.mbd_emit();
++    cout<<"\nMBDEND {\"elapsed_s\":"<<q.TimeElapsed()<<",\"component_attempts\":"<<q.caiq_attempts<<",\"component_accepted\":"<<q.caiq_accepted<<",\"trace_overhead_s\":"<<q.mbd_trace_overhead<<"}"<<endl;
++}
+--- upstream/src/LS-IQCQP/caiq.cpp
++++ native/ls-iqcqp/caiq.cpp
+@@ -0,0 +1,167 @@
++#include "sol.h"
++#include <boost/multiprecision/cpp_int.hpp>
++#include <fstream>
++#include <iomanip>
++#include <set>
++namespace solver {
++using boost::multiprecision::cpp_int;
++static bool big(Float x,cpp_int &out) {
++    if(!std::isfinite(x)||std::floor(x)!=x)return false;
++    std::ostringstream s;s<<std::fixed<<std::setprecision(0)<<x;
++    try {out=cpp_int(s.str());return true;}catch(...){return false;}
++}
++static cpp_int val(const caiq_equation &e,const std::vector<cpp_int> &x) {
++    cpp_int r=0;
++    for(auto &t:e.terms){cpp_int z(t.coefficient);for(int n:t.vars)z*=x[n];r+=z;}
++    return r;
++}
++static bool solve(const caiq_equation &e,int pivot,std::vector<cpp_int> &x,qp_solver &q) {
++    cpp_int a=0,b=0;
++    for(auto &t:e.terms) {
++        cpp_int z(t.coefficient);int degree=0;
++        for(int n:t.vars){if(n==pivot)degree++;else z*=x[n];}
++        if(degree>1)return false;
++        if(degree)a+=z;else b+=z;
++    }
++    cpp_int target=cpp_int(e.rhs)-b,lo,hi;
++    if(a==0||target%a!=0)return false;
++    cpp_int y=target/a;
++    if(!big(q._vars[pivot].lower,lo)||!big(q._vars[pivot].upper,hi)||y<lo||y>hi)return false;
++    x[pivot]=y;return true;
++}
++void qp_solver::caiq_load(const char *path) {
++    std::ifstream f(path);if(!f)throw std::runtime_error("CAIQ metadata unavailable");
++    string tag;
++    while(f>>tag) {
++        if(tag=="MODE"){f>>caiq_enabled;}
++        else if(tag=="I"){
++            string name,value;f>>name>>value;
++            if(!_vars_map.count(name))throw std::runtime_error("Unknown initial variable");
++            Float native=std::stold(value);cpp_int exact;
++            if(!big(native,exact)||exact!=cpp_int(value))throw std::runtime_error("Initial integer cannot be represented");
++            caiq_initial[_vars_map.at(name)]=native;
++        } else if(tag=="E") {
++            string ab,rhs;int count;f>>ab>>rhs>>count;
++            caiq_equation e;e.ab=ab=="-"?-1:_vars_map.at(ab);e.rhs=rhs;
++            for(int i=0;i<count;i++){
++                caiq_term t;int k;f>>t.coefficient>>k;
++                for(int j=0;j<k;j++){string name;f>>name;t.vars.push_back(_vars_map.at(name));}
++                e.terms.push_back(t);
++            }
++            caiq_equations.push_back(e);
++        } else throw std::runtime_error("Invalid CAIQ metadata token");
++    }
++}
++void qp_solver::caiq_initialise(){for(auto &p:caiq_initial)_init_solution_map[p.first]=p.second;}
++
++bool qp_solver::caiq_step() {
++    if(!caiq_enabled||caiq_equations.empty())return false;
++    auto base=(caiq_state.size()==_vars.size() && rand()%5!=0)?caiq_state:(_best_assignment.size()==_vars.size()?_best_assignment:_cur_assignment);
++    std::vector<cpp_int> original;
++    for(Float z:base){cpp_int n;if(!big(z,n))return false;original.push_back(n);}
++    std::vector<int> candidate;
++    for(size_t i=0;i<caiq_equations.size();i++)if(caiq_equations[i].ab>=0&&original[caiq_equations[i].ab]!=0)candidate.push_back(i);
++    if(candidate.empty())return false;
++    for(int trial=0;trial<4;trial++){
++        caiq_attempts++;
++        auto x=original;
++        auto &e=caiq_equations[candidate[rand()%candidate.size()]];
++        bool moved=false;
++        if(e.terms.size()==1&&e.terms[0].vars.size()==2&&e.terms[0].vars[0]!=e.terms[0].vars[1]){
++            auto &t=e.terms[0];int a=t.vars[0],b=t.vars[1];
++            cpp_int k(t.coefficient),target(e.rhs),al,ah,bl,bh;
++            if(k!=0&&target%k==0&&big(_vars[a].lower,al)&&big(_vars[a].upper,ah)&&big(_vars[b].lower,bl)&&big(_vars[b].upper,bh)){
++                target/=k;
++                std::vector<std::pair<cpp_int,cpp_int>> pairs;
++                if(target==0){
++                    if(al<=0&&ah>=0)pairs.push_back({0,x[b]});
++                    if(bl<=0&&bh>=0)pairs.push_back({x[a],0});
++                }else if(target>0&&ah-al<=4096){
++                    for(cpp_int d=std::max(cpp_int(1),al);d<=ah;d++){
++                        if(target%d==0){cpp_int y=target/d;if(y>=bl&&y<=bh)pairs.push_back({d,y});}
++                    }
++                }else if(target>0){
++                    for(int d=1;d<=20000;d++){
++                        if(cpp_int(d)*d>target)break;
++                        if(target%d==0){
++                            cpp_int y=target/d;
++                            if(d>=al&&d<=ah&&y>=bl&&y<=bh)pairs.push_back({d,y});
++                            if(y>=al&&y<=ah&&d>=bl&&d<=bh)pairs.push_back({y,d});
++                        }
++                    }
++                }
++                if(!pairs.empty()){
++                    std::vector<std::pair<cpp_int,cpp_int>> close;
++                    for(auto &p:pairs)if(p.first==x[a]||p.second==x[b])close.push_back(p);
++                    auto &pool=(!close.empty()&&rand()%2==0)?close:pairs;
++                    auto p=pool[rand()%pool.size()];x[a]=p.first;x[b]=p.second;moved=true;
++                }
++            }
++        }
++        if(!moved){
++            std::vector<int> pivots;
++            for(auto &t:e.terms)for(int n:t.vars)if(std::find(pivots.begin(),pivots.end(),n)==pivots.end())pivots.push_back(n);
++            if(pivots.empty())continue;
++            int start=rand()%pivots.size();
++            for(size_t j=0;j<pivots.size();j++)if(solve(e,pivots[(j+start)%pivots.size()],x,*this)){moved=true;break;}
++        }
++        if(!moved||x==original)continue;
++        // Repair only unconditional wiring and components proved healthy by reduction.
++        bool ok=true;
++        for(int pass=0;pass<8;pass++){
++            bool changed=false;
++            for(auto &w:caiq_equations)if(w.ab<0&&val(w,x)!=cpp_int(w.rhs)){
++                bool repaired=false;
++                for(auto &t:w.terms)if(t.vars.size()==1&&solve(w,t.vars[0],x,*this)){repaired=true;changed=true;break;}
++                if(!repaired){ok=false;break;}
++            }
++            if(!ok||!changed)break;
++        }
++        if(!ok)continue;
++        // For fixed signals, weak faults permit the least AB assignment directly.
++        for(auto &w:caiq_equations){
++            if(w.ab<0){if(val(w,x)!=cpp_int(w.rhs)){ok=false;break;}}
++            else x[w.ab]=(val(w,x)!=cpp_int(w.rhs))?1:0;
++        }
++        if(!ok)continue;
++        // Check every native row exactly as integers, including certified cuts.
++        for(auto &c:_constraints){
++            cpp_int lhs=0,bound;
++            if(!big(c.bound,bound)){ok=false;break;}
++            for(auto &t:c.monomials){
++                cpp_int z;if(!big(t.coeff,z)){ok=false;break;}
++                for(int n:t.m_vars)z*=x[n];lhs+=z;
++            }
++            if(!ok|| (c.is_equal?lhs!=bound:c.is_less?lhs>bound:lhs<bound)){ok=false;break;}
++        }
++        if(!ok)continue;
++        cpp_int obj=0;for(int n:_vars_in_obj)obj+=x[n];
++        cpp_int best;
++        if(_best_assignment.size()==_vars.size()&&big(_best_object_value,best)){
++            cpp_int current=0;for(int n:_vars_in_obj)current+=original[n];
++            if(obj>best+2)continue;
++            if(obj>current && !(obj==current+1?rand()%4==0:rand()%16==0))continue;
++        }
++        std::vector<Float> native;
++        for(size_t i=0;i<x.size();i++){
++            Float z=x[i].convert_to<Float>();cpp_int back,lo,hi;
++            if(!big(z,back)||back!=x[i]||!big(_vars[i].lower,lo)||!big(_vars[i].upper,hi)||x[i]<lo||x[i]>hi){ok=false;break;}
++            native.push_back(z);
++        }
++        if(!ok||native==_cur_assignment)continue;
++        caiq_accepted++;
++        cout<<"\nCAIQSTATS "<<caiq_attempts<<" "<<caiq_accepted<<endl;
++        caiq_state=native;
++        _cur_assignment=native;
++        _unbounded_constraints.clear();_unsat_constraints.clear();
++        for(auto &c:_constraints){
++            Float sum=0;for(auto &t:c.monomials)sum+=pro_mono(t);
++            c.value=sum;pro_con_mix(&c);
++        }
++        is_cur_feasible=_unsat_constraints.empty();
++        if(is_cur_feasible){is_feasible=true;_object_weight=1;update_best_solution();}
++        return true;
++    }
++    return false;
++}
++}
+--- upstream/src/LS-IQCQP/ls_no_cons.cpp
++++ native/ls-iqcqp/ls_no_cons.cpp
+@@ -575,6 +575,7 @@
+             _object_weights.push_back(1);
+         }
+         _best_object_value = obj_delta;
++            mbd_emit();
+         // cout <<" init value: "<< _best_object_value << endl;
+         for (int i = 0; i < _vars.size(); i++)
+         {
+@@ -596,7 +597,7 @@
+     void qp_solver::local_search_without_cons()
+     {
+         // std::srand(seed_num);
+-        std::srand(4);//146 for selby02
++        std::srand(seed_num);//146 for selby02
+         cout << " ls_no_cons " << endl; 
+         initialize_without_cons();
+         int var_pos;
+--- upstream/src/LS-IQCQP/ls_bin.cpp
++++ native/ls-iqcqp/ls_bin.cpp
+@@ -22,7 +22,7 @@
+ 
+     void qp_solver::local_search_bin_new()
+     {
+-        std::srand(8);
++        std::srand(seed_num);
+         initialize();
+         // exit(0);
+         // precess_small_ins();
+@@ -1338,7 +1338,7 @@
+ 
+     void qp_solver::local_search_bin()
+     {
+-        std::srand(8);
++        std::srand(seed_num);
+         initialize();
+         // exit(0);
+         int var_pos;
+--- upstream/src/LS-IQCQP/ls_mix_not_dis.cpp
++++ native/ls-iqcqp/ls_mix_not_dis.cpp
+@@ -944,6 +944,7 @@
+                 obj_delta += pro_mono(_object_monoials[mono_pos]);
+             }
+             _best_object_value = obj_delta;
++            mbd_emit();
+         }
+         // _object_weight = 0;
+         // init score;
+@@ -2042,7 +2043,7 @@
+                     _cur_assignment.push_back(_init_solution_map[i]);
+                 }
+                 else if (_vars[i].is_constant) _cur_assignment.push_back(_vars[i].constant);
+-                if (_vars[i].has_lower && _vars[i].has_upper)
++                else if (_vars[i].has_lower && _vars[i].has_upper)
+                 {
+                     Float average = (_vars[i].lower + _vars[i].upper) / 2;
+                     if (_vars[i].is_int) average = round(average);
+@@ -2159,6 +2160,7 @@
+                 obj_delta += pro_mono(_object_monoials[mono_pos]);
+             }
+             _best_object_value = obj_delta;
++            mbd_emit();
+         }
+         // _object_weight = 0;
+         // init score;
+--- upstream/src/LS-IQCQP/component.cpp
++++ native/ls-iqcqp/component.cpp
+@@ -730,6 +730,7 @@
+                 obj_delta += pro_mono(_object_monoials[mono_pos]);
+             }
+             _best_object_value = obj_delta;
++            mbd_emit();
+         }
+         _object_weight = 0;
+         // init score;
+@@ -987,6 +988,7 @@
+             _best_object_value = obj_delta;
+             _best_assignment = _cur_assignment;
+             _best_steps = _steps;
++            mbd_emit();
+         }
+     }
+     
+--- upstream/src/LS-IQCQP/sol.h
++++ native/ls-iqcqp/sol.h
+@@ -169,6 +169,8 @@
+     };
+ 
+ 
++    struct caiq_term { string coefficient; vector<int> vars; };
++    struct caiq_equation { int ab=-1; string rhs; vector<caiq_term> terms; };
+     class qp_solver {
+     public:
+         int                                             tabu_switch;
+@@ -181,7 +183,20 @@
+         int                                             unsat_cls_num_with_bool;
+         int                                             unbounded_cls_num_with_real;
+         int                                             unbounded_cls_num_with_bool;
+-        int                                             seed_num;
++        int                                             seed_num=1;
++        Float mbd_last_emitted=INT32_MAX;
++        bool mbd_trace=false;
++        double mbd_trace_overhead=0;
++        void mbd_emit();
++        void mbd_dump();
++        bool caiq_enabled=false;
++        long long caiq_attempts=0,caiq_accepted=0;
++        unordered_map<int,Float> caiq_initial;
++        vector<caiq_equation> caiq_equations;
++        vector<Float> caiq_state;
++        void caiq_load(const char *path);
++        void caiq_initialise();
++        bool caiq_step();
+         //var information
+         int                                             cons_num_type; // <= 50 : 0      >50 : 1
+         int                                             problem_type;
+--- upstream/src/LS-IQCQP/ls_balance.cpp
++++ native/ls-iqcqp/ls_balance.cpp
+@@ -1353,6 +1353,7 @@
+         cout << "mix_balance" << endl;
+         // initialize_mix();
+         sta_cons();
++        caiq_initialise();
+         restart_by_new_solution();//test
+         
+         // 启用约束级别的tabu机制
+@@ -1368,7 +1369,8 @@
+         for (_steps = 0; _steps <= _max_steps; _steps++)
+         {
+             //TODO
+-            if (_steps % 1000 == 0 && (TimeElapsed() > _cut_off)) break;
++            if (_steps % 64 == 0 && (TimeElapsed() > _cut_off)) break;
++            if (_steps % 64 == 0 && caiq_enabled) caiq_step();
+             if (is_cur_feasible)
+             {
+                 insert_operation_balance();

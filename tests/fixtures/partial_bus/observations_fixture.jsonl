@@ -1,0 +1,2 @@
+# {"circuit":"partial_bus","faults":[],"test_fixture":true}
+{"inputs":{"a":"0x1","b":"0x1","c":"0x0"},"outputs":{"y":"0x3"}}
