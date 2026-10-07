@@ -1,5 +1,6 @@
 """Exact integer checks independent of SCIP constraint tolerances."""
 import math
+from iqcqp_model import circuit_wiring, signal_layout
 
 def decode_integers(raw, mapping, tolerance=1e-6):
     if set(raw) != {v["lp_name"] for v in mapping["variables"]}:
@@ -27,10 +28,12 @@ def validate(model, values, solver_objective=None):
             high, low = v["bits"]
             if type(x) is not int or not 0 <= x < (1 << (high - low + 1)):
                 errors.append(f"bit width: {v['name']}")
-            if type(x) is int:
-                signals[v["signal"]] = signals.get(v["signal"], 0) + (x << low)
     if any(type(x) is not int for x in values.values()):
         return dict(valid=False, errors=errors, checks=checks)
+    # Reconstruct every original signal, including names absent from the shared
+    # variable list. Wiring and healthy functions are checked at original ports.
+    for signal, segments in signal_layout(model).items():
+        signals[signal] = sum(values[segment["name"]] << segment["low"] for segment in segments)
 
     def ref(r):
         return (signals[r["signal"]] >> r["low"]) & ((1 << (r["high"] - r["low"] + 1)) - 1)
@@ -40,11 +43,11 @@ def validate(model, values, solver_objective=None):
             acc = (acc << p["width"]) + (ref(p["ref"]) if p["ref"] else 0)
         return acc
 
+    for c in circuit_wiring(model):
+        checks["wiring"] += 1
+        if ref(c["target"]) != expr(c["source"]):
+            errors.append(f"wiring: {c['name']}")
     for c in model["constraints"]:
-        if c["kind"] == "wiring":
-            checks["wiring"] += 1
-            if ref(c["target"]) != expr(c["source"]):
-                errors.append(f"wiring: {c['name']}")
         lhs = sum(t["coef"] * values[t["var"]] for t in c["linear"])
         lhs += sum(t["coef"] * values[t["vars"][0]] * values[t["vars"][1]] for t in c["quadratic"])
         checks["polynomial_constraints"] += 1

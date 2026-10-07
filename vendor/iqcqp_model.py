@@ -12,7 +12,7 @@ render_lp() returns LP text and an in-memory variable map.
 from __future__ import annotations
 
 import argparse
-from collections import defaultdict
+from collections import defaultdict, deque
 import copy
 from dataclasses import dataclass
 import hashlib
@@ -239,10 +239,10 @@ def _expr_json(expr: Expr) -> dict[str, Any]:
 
 
 def _affine_ref(ref: Ref, segments: dict[str, list[tuple[int, int, str]]]) -> dict[str, int]:
-    result: dict[str, int] = {}
+    result: dict[str, int] = defaultdict(int)
     for low, high, name in segments[ref.name]:
         if low >= ref.low and high <= ref.high:
-            result[name] = 1 << (low - ref.low)
+            result[name] += 1 << (low - ref.low)
         elif high >= ref.low and low <= ref.high:
             raise ValueError(f"Slice does not align with segment: {ref}")
     if sum(high - low + 1 for low, high, _ in segments[ref.name] if low >= ref.low and high <= ref.high) != ref.width:
@@ -277,6 +277,104 @@ def _polynomial(*affine: tuple[int, dict[str, int]], product: tuple[dict[str, in
             "quadratic": [{"vars": list(pair), "coef": coefficient} for pair, coefficient in sorted(quadratic.items()) if coefficient]}
 
 
+def signal_layout(model: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Original signal slices, each referring to its shared model variable."""
+    if "signal_segments" in model:
+        return model["signal_segments"]
+    layout: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for variable in model["variables"]:
+        if variable["role"] != "abnormal":
+            high, low = variable["bits"]
+            layout[variable["signal"]].append(dict(name=variable["name"], low=low, high=high))
+    return dict(layout)
+
+
+def circuit_wiring(model: dict[str, Any]) -> list[dict[str, Any]]:
+    """Original wiring retained independently of normalized polynomials."""
+    if "wiring" in model:
+        return model["wiring"]
+    return [constraint for constraint in model["constraints"] if constraint["kind"] == "wiring"]
+
+
+def _shared_signal_variables(signals, assignments, components):
+    # Align slice boundaries across unconditional copies before allocating any
+    # model variables. A whole-bus alias must also share subsequently used slices.
+    cuts = {name: {0, signal.width} for name, signal in signals.items()}
+    for ref in [a.target for a in assignments] + [c.output for c in components]:
+        cuts[ref.name].update((ref.low, ref.high + 1))
+    for expr in [a.source for a in assignments] + [e for c in components for e in (c.a, c.b)]:
+        for _, ref in expr.parts:
+            if ref:
+                cuts[ref.name].update((ref.low, ref.high + 1))
+    copies = []
+    zeros = []
+    neighbors = defaultdict(list)
+    for assignment in assignments:
+        offset = assignment.target.low
+        for width, source in reversed(assignment.source.parts):
+            target = Ref(assignment.target.name, offset, offset + width - 1)
+            cuts[target.name].update((target.low, target.high + 1))
+            if source is None:
+                zeros.append(target)
+            else:
+                copies.append((source, target))
+                neighbors[source.name].append((source.low, source.high + 1, target.name, target.low))
+                neighbors[target.name].append((target.low, target.high + 1, source.name, source.low))
+            offset += width
+    queue = deque(signals)
+    queued = set(signals)
+    while queue:
+        name = queue.popleft()
+        queued.remove(name)
+        for low, end, other, other_low in neighbors[name]:
+            added = {other_low + boundary - low for boundary in cuts[name] if low <= boundary <= end} - cuts[other]
+            if added:
+                cuts[other].update(added)
+                if other not in queued:
+                    queue.append(other)
+                    queued.add(other)
+    segments = {}
+    locations = {}
+    for signal in signals.values():
+        bounds = sorted(cuts[signal.name])
+        pieces = []
+        for low, end in zip(bounds, bounds[1:]):
+            high = end - 1
+            name = signal.name if len(bounds) == 2 else f"{signal.name}[{high}:{low}]"
+            pieces.append((low, high, name))
+            locations[name] = (signal, low, high)
+        segments[signal.name] = pieces
+    parent = {name: name for name in locations}
+    def find(name):
+        while parent[name] != name:
+            parent[name] = parent[parent[name]]
+            name = parent[name]
+        return name
+    by_low = {name: {low: (high, variable) for low, high, variable in pieces} for name, pieces in segments.items()}
+    for source, target in copies:
+        for low, high, name in segments[target.name]:
+            if target.low <= low and high <= target.high:
+                source_low = source.low + low - target.low
+                source_high, source_name = by_low[source.name][source_low]
+                assert source_high - source_low == high - low
+                a, b = sorted((find(name), find(source_name)))
+                parent[b] = a
+    fixed_zero = {find(name) for target in zeros for low, high, name in segments[target.name]
+                  if target.low <= low and high <= target.high}
+    shared = {signal: [(low, high, find(name)) for low, high, name in pieces]
+              for signal, pieces in segments.items()}
+    variables = []
+    for name in sorted({find(name) for name in locations}):
+        signal, low, high = locations[name]
+        width = high - low + 1
+        variables.append(dict(name=name, signal=signal.name, bits=[high, low], role=signal.role,
+                              type="binary" if width == 1 else "integer", lb=0,
+                              ub=0 if name in fixed_zero else (1 << width) - 1))
+    return shared, variables, dict(signal_segments_before_alias_merge=len(locations),
+        shared_signal_variables=len(variables), aliases_merged=len(locations) - len(variables),
+        zero_fixed_variables=len(fixed_zero))
+
+
 def build_model(netlist: Path, library_dir: Path | None = None) -> dict[str, Any]:
     """Build an exact healthy arithmetic model from a supported top-level netlist.
 
@@ -290,35 +388,20 @@ def build_model(netlist: Path, library_dir: Path | None = None) -> dict[str, Any
     if not library:
         raise ValueError(f"No library modules in {library_dir}")
     module, signals, assignments, components = _parse_top(netlist, library)
-    cuts = {name: {0, signal.width} for name, signal in signals.items()}
-    for ref in [a.target for a in assignments] + [c.output for c in components]:
-        cuts[ref.name].update((ref.low, ref.high + 1))
-    for expr in [a.source for a in assignments] + [e for c in components for e in (c.a, c.b)]:
-        for _, ref in expr.parts:
-            if ref:
-                cuts[ref.name].update((ref.low, ref.high + 1))
-    segments: dict[str, list[tuple[int, int, str]]] = {}
-    variables = []
-    for signal in signals.values():
-        bounds = sorted(cuts[signal.name])
-        pieces = []
-        for low, end in zip(bounds, bounds[1:]):
-            high = end - 1
-            name = signal.name if len(bounds) == 2 else f"{signal.name}[{high}:{low}]"
-            pieces.append((low, high, name))
-            width = end - low
-            variables.append({"name": name, "signal": signal.name, "bits": [high, low],
-                              "role": signal.role, "type": "binary" if width == 1 else "integer",
-                              "lb": 0, "ub": (1 << width) - 1})
-        segments[signal.name] = pieces
+    segments, variables, normalization = _shared_signal_variables(signals, assignments, components)
     constraints = []
+    wiring = []
     for assignment in assignments:
         target = _affine_ref(assignment.target, segments)
         source = _affine_expr(assignment.source, segments)
-        constraints.append({"name": f"wire_line_{assignment.line}", "kind": "wiring",
-                            "line": assignment.line, "target": _ref_json(assignment.target),
-                            "source": _expr_json(assignment.source),
-                            **_polynomial((1, target), (-1, source))})
+        original = {"name": f"wire_line_{assignment.line}", "kind": "wiring",
+                    "line": assignment.line, "target": _ref_json(assignment.target),
+                    "source": _expr_json(assignment.source)}
+        wiring.append(original)
+        poly = _polynomial((1, target), (-1, source))
+        if poly["linear"] or poly["quadratic"]:
+            constraints.append({**original, **poly})
+    normalization["wiring_constraints_removed"] = len(wiring) - len(constraints)
     for component in components:
         out = _affine_ref(component.output, segments)
         a = _affine_expr(component.a, segments)
@@ -339,6 +422,10 @@ def build_model(netlist: Path, library_dir: Path | None = None) -> dict[str, Any
                    "segments": [{"name": n, "high": h, "low": l} for l, h, n in segments[s.name]]}
                   for s in signals.values() if s.role in {"input", "output"}],
         "variables": variables,
+        "signal_segments": {signal: [dict(name=name, low=low, high=high) for low, high, name in pieces]
+                            for signal, pieces in segments.items()},
+        "wiring": wiring,
+        "normalization": normalization,
         "components": [{"name": c.name, "module": c.module, "operation": c.operation,
                         "a": _expr_json(c.a), "b": _expr_json(c.b),
                         "output": _ref_json(c.output), "line": c.line} for c in components],
@@ -409,6 +496,10 @@ def build_observation_model(healthy_model: dict[str, Any], observation: Path) ->
         for segment in port["segments"]:
             name, low, high = segment["name"], segment["low"], segment["high"]
             value = (whole >> low) & ((1 << (high - low + 1)) - 1)
+            if name in observed_segments and observed_segments[name] != value:
+                raise ValueError(f"Conflicting observations through a connection alias: {port['name']}")
+            if not variables[name]["lb"] <= value <= variables[name]["ub"]:
+                raise ValueError(f"Observation contradicts a connection domain: {port['name']}")
             observed_segments[name] = value
             variables[name]["lb"] = variables[name]["ub"] = value
     new_constraints = []
@@ -537,7 +628,8 @@ def render_lp(model: dict[str, Any]) -> tuple[str, dict[str, Any]]:
                "variables": [{"lp_name": variable_names[v["name"]], **v} for v in model["variables"]],
                "constraints": [{"lp_name": label_names[c["name"]], "name": c["name"],
                                 "kind": c["kind"]} for c in model["constraints"]],
-               "ports": model["ports"], "objective": objective}
+               "ports": model["ports"], "signal_segments": model.get("signal_segments"),
+               "objective": objective}
     return "\n".join(lines) + "\n", mapping
 
 

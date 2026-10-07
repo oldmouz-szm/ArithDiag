@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Brute-force semantic checks, then audits across every supplied observation."""
-import sys,itertools,json,time,random
+import sys,itertools,json,time,random,tempfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/"src"))
 from preprocess import *
@@ -36,9 +36,111 @@ def exhaustive(model):
     for vals in itertools.product(*(range(v["lb"],v["ub"]+1) for v in free)):
         x=dict(fixed,**{v["name"]:z for v,z in zip(free,vals)})
         if validate(model,x)["valid"]:yield x
+
+def check_builder_aliases():
+    """Compare normalized polynomials with independent whole-signal arithmetic.
+
+    Enumerate polynomial feasibility separately from the original-signal checker,
+    so an incorrect normalization cannot be hidden by the final validator.
+    """
+    counts=dict(builder_alias_cases=0,builder_alias_feasible_witnesses=0,
+                builder_alias_contradictions=0,builder_alias_transform_checks=0)
+    with tempfile.TemporaryDirectory(prefix="alias-builder-",dir=ROOT/"results") as directory:
+        base=Path(directory);library=base/"library";library.mkdir()
+        # Interface fixtures exercise the integer frontend, not gate synthesis.
+        (library/"u_rca8.v").write_text("module u_rca8(input [7:0] a, input [7:0] b, output [8:0] u_rca8_out);\nendmodule\n")
+        (library/"u_arrmul4.v").write_text("module u_arrmul4(input [3:0] a, input [3:0] b, output [7:0] u_arrmul4_out);\nendmodule\n")
+        def build(name,ports,body,inputs,outputs):
+            case=base/name;case.mkdir(exist_ok=True)
+            top=case/"netlist.v";top.write_text("module test("+ports+");\n"+body+"\nendmodule\n")
+            obs=case/"observations_001.jsonl"
+            obs.write_text("# "+json.dumps(dict(circuit=name))+"\n"+json.dumps(dict(inputs={k:hex(v) for k,v in inputs.items()},outputs={k:hex(v) for k,v in outputs.items()}))+"\n")
+            return load_builder().build_diagnostic_model(top,obs,library)
+        def check(model,signal,expected):
+            free=[v for v in model["variables"] if v["lb"]!=v["ub"]]
+            fixed={v["name"]:v["lb"] for v in model["variables"] if v["lb"]==v["ub"]}
+            observed=set();feasible=[];ab="AB_"+model["components"][0]["name"]
+            for values in itertools.product(*(range(v["lb"],v["ub"]+1) for v in free)):
+                x=dict(fixed,**{v["name"]:value for v,value in zip(free,values)})
+                def row(c):
+                    lhs=sum(t["coef"]*x[t["var"]] for t in c["linear"])+sum(t["coef"]*x[t["vars"][0]]*x[t["vars"][1]] for t in c["quadratic"])
+                    return {"eq":lhs==c["rhs"],"le":lhs<=c["rhs"],"ge":lhs>=c["rhs"]}[c["sense"]]
+                if not all(row(c) for c in model["constraints"]):continue
+                original=sum(x[s["name"]]<<s["low"] for s in signal_layout(model)[signal])
+                observed.add((original,x[ab]));feasible.append(x)
+                assert validate(model,x)["valid"]
+            assert observed==expected,(model["circuit"],len(observed),len(expected))
+            assert len(feasible)==len(expected),"Shared variables must not add witness multiplicity"
+            assert model["normalization"]["aliases_merged"]>0
+            assert len([v for v in model["variables"] if v["role"]=="abnormal"])==len(model["components"])
+            for structural,dominance in ((False,False),(True,False),(True,True)):
+                pre=transform(model,structural,dominance)
+                assert all(n==r for n,r in pre["rename"].items()),"No downstream alias elimination"
+                for x in feasible:
+                    values={n:x[n] for n in pre["specs"]}
+                    restored,_=restore(pre,values);assert restored==x
+                counts["builder_alias_transform_checks"]+=1
+            candidate=initial(model);assert candidate is not None and validate(model,candidate)["valid"]
+            for conflict in cone_conflicts(model):
+                assert all(any(x["AB_"+c] for c in conflict) for x in feasible)
+            counts["builder_alias_cases"]+=1
+            counts["builder_alias_feasible_witnesses"]+=len(feasible)
+        def reject(*args):
+            try:build(*args)
+            except ValueError as exc:
+                assert "connection" in str(exc),exc
+                counts["builder_alias_contradictions"]+=1
+            else:raise AssertionError("Contradictory aliased observations accepted")
+        ports="input [7:0] a, input [7:0] b, output [1:0] y, output [1:0] z"
+        body="""wire [8:0] u;
+wire [8:0] t;
+wire [8:0] r;
+assign t = u;
+assign r = t;
+assign y = r[1:0];
+assign z = {r[0], r[0]};
+u_rca8 A0 (.a(a), .b(b), .u_rca8_out(u));"""
+        for y,z in ((3,3),(2,0)):
+            model=build("chain"+str(y),ports,body,dict(a=1,b=2),dict(y=y,z=z))
+            check(model,"u",{(u,ab) for u in range(512) for ab in (0,1) if u%4==y and (u%2)*3==z and (ab or u==3)})
+            assert all(c["kind"]!="wiring" for c in model["constraints"])
+        reject("bad_duplicate",ports,body,dict(a=1,b=2),dict(y=3,z=1))
+        ports="input [7:0] a, input [7:0] b, output [8:0] y, output [7:0] z"
+        body="""wire [8:0] u;
+assign y = u;
+assign z = {7'b0, u[0]};
+u_rca8 A0 (.a(a), .b(b), .u_rca8_out(u));"""
+        for y,z in ((3,1),(2,0)):
+            check(build("zero"+str(y),ports,body,dict(a=1,b=2),dict(y=y,z=z)),"u",{(y,ab) for ab in (0,1) if ab or y==3})
+        reject("bad_zero",ports,body,dict(a=1,b=2),dict(y=2,z=2))
+        reject("bad_shared_output",ports,body,dict(a=1,b=2),dict(y=2,z=1))
+        # The lexicographic representative of input z is output a, exercising
+        # reconstruction and nominal evaluation independently of variable roles.
+        ports="input [7:0] z, input [7:0] b, output [7:0] a, output [8:0] y"
+        body="""wire [7:0] t;
+wire [8:0] u;
+assign t = z;
+assign a = t;
+assign y = u;
+u_rca8 A0 (.a(t), .b(b), .u_rca8_out(u));"""
+        for y in (3,7):
+            check(build("input_alias"+str(y),ports,body,dict(z=1,b=2),dict(a=1,y=y)),"u",{(y,ab) for ab in (0,1) if ab or y==3})
+        reject("bad_input_alias",ports,body,dict(z=1,b=2),dict(a=2,y=3))
+        ports="input [0:0] a, output [7:0] y"
+        body="""wire [3:0] t;
+assign t = {a, a, a, a};
+u_arrmul4 M0 (.a(t), .b(t), .u_arrmul4_out(y));"""
+        for y in (225,224):
+            model=build("repeated"+str(y),ports,body,dict(a=1),dict(y=y))
+            check(model,"y",{(y,ab) for ab in (0,1) if ab or y==225})
+            healthy=next(c for c in model["constraints"] if c["name"]=="guard_pos_M0")
+            assert healthy["quadratic"]==[dict(vars=["a","a"],coef=-225)]
+    return counts
+
 def main():
     (ROOT/"results").mkdir(exist_ok=True)
     begun=time.perf_counter();counts=dict(toy_models=0,toy_feasible_witnesses=0,conflict_soundness_checks=0,transform_checks=0)
+    counts.update(check_builder_aliases())
     fixture=ROOT/"tests/fixtures/partial_bus"
     partial=load_builder().build_diagnostic_model(fixture/"netlist.v",fixture/"observations_fixture.jsonl",ROOT/"tests/fixtures/library")
     assert initial_nominal(partial)["y"]==3

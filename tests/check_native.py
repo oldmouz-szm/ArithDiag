@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"src"))
 from check_correctness import toy
 from preprocess import transform, initial, projected_initial, restore
-from model_io import render, audit, exact_int
+from model_io import render, audit, exact_int, load_builder
 from worker import encode, metadata, local_check
 def main():
     native=ROOT/"native/ls-iqcqp/build/LS-IQCQP"
@@ -15,6 +15,18 @@ def main():
     audits=traces=0
     with tempfile.TemporaryDirectory(prefix="arithdiag-test-") as tmp:
         lp=Path(tmp)/"probe.lp"
+        fixture=ROOT/"tests/fixtures/partial_bus"
+        model=load_builder().build_diagnostic_model(fixture/"netlist.v",fixture/"observations_fixture.jsonl",ROOT/"tests/fixtures/library")
+        pre=transform(model,False,False)
+        group=dict(variables=sorted(pre["specs"]),components=[c["name"] for c in model["components"]],
+            constraints=[c for g in pre["groups"] for c in g["constraints"]])
+        specs,encoded,names=encode(pre,group);lp.write_text(render(specs,encoded))
+        for binary in (native,baseline):
+            proc=subprocess.run([str(binary),"--audit",str(lp)],capture_output=True,text=True,timeout=15)
+            assert proc.returncode==0,proc.stderr
+            assert audit(specs,encoded,json.loads(proc.stdout))["mathematically_equivalent_input"]
+            audits+=1
+        restore(pre,projected_initial(pre,initial(model)))
         for inputs,outputs in [((1,0,1),(2,7)),((1,1,1),(4,13))]:
             model=toy(inputs,outputs,True);pre=transform(model,True,False)
             init=projected_initial(pre,initial(model))

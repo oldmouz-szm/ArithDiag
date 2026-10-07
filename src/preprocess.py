@@ -2,6 +2,7 @@
 from collections import defaultdict
 import copy, math, random, time
 from model_io import ROOT,IQ,load_builder,validate
+from iqcqp_model import circuit_wiring, signal_layout
 from residual import split_nonlinear
 from dominance import top_level_search_components
 
@@ -37,24 +38,9 @@ def normal_equations(model):
 
 def transform(model,structural=False,dominance=False):
     variables={v["name"]:dict(v) for v in model["variables"]}
+    # Connection aliases are already shared by the common model builder.
     rename={n:n for n in variables}
-    # Only unconditional wire equalities can identify variables.
-    if structural:
-        def find(n):
-            while rename[n]!=n:
-                rename[n]=rename[rename[n]];n=rename[n]
-            return n
-        for c in model["constraints"]:
-            if c["kind"]!="wiring" or c["quadratic"] or c["rhs"]!=0:continue
-            ts=[t for t in c["linear"] if t["coef"]]
-            if len(ts)!=2 or sorted(t["coef"] for t in ts)!=[-1,1]:continue
-            a,b=sorted(find(t["var"]) for t in ts)
-            if a==b:continue
-            lo=max(variables[a]["lb"],variables[b]["lb"]);hi=min(variables[a]["ub"],variables[b]["ub"])
-            if lo>hi:raise ValueError("Inconsistent wire domains")
-            rename[b]=a;variables[a].update(lb=lo,ub=hi)
-        rename={n:find(n) for n in rename}
-    reps={rename[n]:variables[rename[n]] for n in variables}
+    reps=variables
     fixed={n:v["lb"] for n,v in reps.items() if v["lb"]==v["ub"]}
     dominated={}
     if dominance:
@@ -111,7 +97,8 @@ def transform(model,structural=False,dominance=False):
         equations.append(r)
     return dict(model=model,specs=specs,fixed=fixed,rename=rename,groups=groups,equations=equations,
         stats=dict(original_variables=len(variables),remaining_variables=len(specs),remaining_constraints=len(residual),
-            independent_groups=len(groups),dominated_components=len(dominated),aliases_removed=len(variables)-len(reps),
+            independent_groups=len(groups),dominated_components=len(dominated),
+            aliases_removed=model.get("normalization",{}).get("aliases_merged",0),
             propagated_variables=propagation))
 
 def restore(pre,values):
@@ -122,11 +109,9 @@ def restore(pre,values):
 
 def initial(model):
     """Construct a witness using inputs and observed outputs, never fault metadata."""
-    widths={}
-    for v in model["variables"]:
-        if v["role"]!="abnormal":widths[v["signal"]]=max(widths.get(v["signal"],0),v["bits"][0]+1)
+    widths={signal:max(segment["high"] for segment in segments)+1 for signal,segments in signal_layout(model).items()}
     signals={p["name"]:model["observed_ports"][p["name"]] for p in model["ports"] if p["direction"]=="input"}
-    wires=[c for c in model["constraints"] if c["kind"]=="wiring"]
+    wires=circuit_wiring(model)
     known={n:(1<<widths[n])-1 for n in signals}
     def ref(r):
         mask=((1<<(r["high"]-r["low"]+1))-1)<<r["low"]
@@ -211,12 +196,10 @@ def projected_initial(pre,full):
 def cone_conflicts(model):
     """Certified cones per observed word segment, with whole-component ABs."""
     nominal=initial_nominal(model)
-    variables=[v for v in model["variables"] if v["role"]!="abnormal"]
-    by_signal=defaultdict(list)
-    for v in variables:by_signal[v["signal"]].append(v)
+    by_signal=signal_layout(model)
     def touched(r):
         return ["v:"+v["name"] for v in by_signal[r["signal"]]
-                if max(v["bits"][1],r["low"])<=min(v["bits"][0],r["high"])]
+                if max(v["low"],r["low"])<=min(v["high"],r["high"])]
     incoming=defaultdict(set)
     for c in model["components"]:
         node="c:"+c["name"]
@@ -224,15 +207,14 @@ def cone_conflicts(model):
         for e in (c["a"],c["b"]):
             for part in e["parts"]:
                 if part["ref"]:incoming[node].update(touched(part["ref"]))
-    for c in model["constraints"]:
-        if c["kind"]=="wiring":
-            src={n for p in c["source"]["parts"] if p["ref"] for n in touched(p["ref"])}
-            for dst in touched(c["target"]):incoming[dst].update(src)
+    for c in circuit_wiring(model):
+        src={n for p in c["source"]["parts"] if p["ref"] for n in touched(p["ref"])}
+        for dst in touched(c["target"]):incoming[dst].update(src)
     conflicts=[]
-    for v in variables:
-        if v["role"]!="output":continue
-        hi,lo=v["bits"];mask=(1<<(hi-lo+1))-1
-        if (nominal[v["signal"]]>>lo)&mask==(model["observed_ports"][v["signal"]]>>lo)&mask:continue
+    outputs=[(p["name"],v) for p in model["ports"] if p["direction"]=="output" for v in by_signal[p["name"]]]
+    for signal,v in outputs:
+        hi,lo=v["high"],v["low"];mask=(1<<(hi-lo+1))-1
+        if (nominal[signal]>>lo)&mask==(model["observed_ports"][signal]>>lo)&mask:continue
         seen=set();stack=["v:"+v["name"]];cs=set()
         while stack:
             n=stack.pop()
@@ -247,9 +229,7 @@ def cone_conflicts(model):
 def initial_nominal(model):
     # Exact healthy evaluation; no observations on internal signals.
     signals={p["name"]:model["observed_ports"][p["name"]] for p in model["ports"] if p["direction"]=="input"}
-    widths={}
-    for v in model["variables"]:
-        if v["role"]!="abnormal":widths[v["signal"]]=max(widths.get(v["signal"],0),v["bits"][0]+1)
+    widths={signal:max(segment["high"] for segment in segments)+1 for signal,segments in signal_layout(model).items()}
     known={n:(1<<widths[n])-1 for n in signals}
     def expr(e):
         z=0
@@ -261,7 +241,7 @@ def initial_nominal(model):
             v=0 if r is None else (signals[r["signal"]]>>r["low"])&((1<<(r["high"]-r["low"]+1))-1)
             z=(z<<p["width"])+v
         return z
-    pending=[("w",c) for c in model["constraints"] if c["kind"]=="wiring"]+[("c",c) for c in model["components"]]
+    pending=[("w",c) for c in circuit_wiring(model)]+[("c",c) for c in model["components"]]
     while pending:
         rest=[]
         for typ,c in pending:

@@ -18,6 +18,11 @@ A faulty component (`AB=1`) may produce any output within its legal width.
 Wiring and the observed top-level inputs and outputs remain enforced.
 The objective is to minimize the number of abnormal components.
 
+All configurations, including `baseline`, share the same normalized integer
+model. Unconditional wire aliases use one variable from model construction;
+slice boundaries are aligned across copies. Original signal/slice and wiring
+maps are retained for initialization and exact original-circuit checks.
+
 ArithDiag searches for one best feasible diagnosis within a whole-instance budget.
 It is an incomplete search method. A candidate is marked optimal only when its
 exactly checked cardinality matches an independently justified internal lower
@@ -92,14 +97,17 @@ maximum. There are no hidden reference-optimum targets.
 
 | Method | Configuration |
 | --- | --- |
-| `baseline` | LS-IQCQP search without ArithDiag optimizations; observed constants are substituted, with seed/witness instrumentation and exact verification |
-| `structure` | Wiring aliases, propagation, decomposition and conservative dominance reduction |
+| `baseline` | LS-IQCQP search after common wire-alias normalization and observed-constant substitution, with seed/witness instrumentation and exact verification |
+| `structure` | Healthy-value propagation, decomposition, conservative dominance reduction and basic output-cone conflict lower bounds |
 | `restart` | Structure, circuit initialization and stagnation restarts |
 | `semantic` | Restart plus arithmetic component neighborhoods |
-| `full` | Semantic plus certified conflict refinement, conflict constraints and lower bounds |
+| `full` | Semantic plus certified conflict refinement, explicit conflict constraints and dynamic conflict learning |
 
 These are ArithDiag configurations, not implementations of SATbD or BE-RC2.
 External baseline projects are not bundled with this source release.
+Wire-alias normalization is common modeling work, not a `structure` ablation.
+Historical results from v0.1.0 used different model construction and must not be
+combined with new runs; the runner rejects changed code hashes on resume.
 
 ## Outputs and resource limits
 

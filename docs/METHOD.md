@@ -9,16 +9,31 @@ slices and zero extensions determine which bits are visible. Exact candidate
 checking includes domains, all polynomial constraints, wiring, healthy functions
 and every observed port.
 
+Unconditional connection aliases are identified before signal variables are
+allocated, for every configuration. Slice boundaries propagate across direct
+copies, including slice and concatenation connections. Equal aligned slices
+share one bounded integer; zero-padding slices are fixed to zero. Guarded
+component functions never identify variables. Conflicting observations on a
+shared variable are rejected instead of overwriting one another.
+
+The model keeps original signal-to-variable slice maps and original wiring
+metadata. Forward initialization, structural dependency analysis and exact
+verification still use those original interfaces. Redundant alias equalities
+are absent from the search polynomial model; no later alias-elimination pass
+is needed. The construction preserves all weak-fault assignments and component
+identities, unlike the subsequent minimum-cardinality dominance reduction.
+
 Known inputs can make a product constant. The benchmark contains both
 linearizable instances and products with unknown internal factors. A quadratic
 representation alone does not establish nonlinear search difficulty.
 
 ## Search pipeline
 
-1. Read one top-level netlist, component interfaces and one observation.
-2. Substitute observed constants. Structural configurations additionally remove
-   unconditional aliases and propagate precisely determined healthy values.
-   Partial buses retain explicit bit segments.
+1. Read one top-level netlist and component interfaces. Construct the common
+   integer model with shared variables for unconditional connection aliases.
+2. Attach one observation and substitute observed constants. Structural
+   configurations additionally propagate precisely determined healthy values.
+   Partial buses retain explicit bit segments and original signal mappings.
 3. Apply conservative component dominance with a restoration map. This reduction
    preserves the minimum-cardinality search objective under the implemented
    weak-fault assumptions, but does not preserve all diagnosis identities.
@@ -35,6 +50,8 @@ representation alone does not establish nonlinear search difficulty.
    the internal lower bound.
 
 A lower bound is obtained from pairwise disjoint proven conflicts. It may be weak.
+Basic cone bounds are available from `structure` onward; `full` additionally
+refines conflicts, adds explicit cuts and learns conflicts between rounds.
 Conflict refinement has bounded work. Incomplete factor scans are heuristic and
 never constitute a proof that no factors exist. Truncated low-bit products do not
 receive invalid complete-product divisibility tests.

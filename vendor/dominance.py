@@ -7,6 +7,7 @@ only lose reductions. Dominance is used ONLY to find/prove the minimum; all
 original component AB patterns are restored for projected enumeration.
 """
 from functools import lru_cache
+from iqcqp_model import circuit_wiring
 def top_level_search_components(model, group):
     edges={}
     def edge(a,b):
@@ -17,9 +18,8 @@ def top_level_search_components(model, group):
     sink="@OBS"
     for p in model["ports"]:
         if p["direction"]=="output": edge("s:"+p["name"],sink)
-    for c in model["constraints"]:
-        if c["kind"]=="wiring":
-            for src in refs(c["source"]): edge("s:"+src,"s:"+c["target"]["signal"])
+    for c in circuit_wiring(model):
+        for src in refs(c["source"]): edge("s:"+src,"s:"+c["target"]["signal"])
     for c in model["components"]:
         node="c:"+c["name"]
         for src in refs(c["a"])+refs(c["b"]): edge("s:"+src,node)

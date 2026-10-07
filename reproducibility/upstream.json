@@ -25,6 +25,7 @@
     "instances": 450
   },
   "algorithm_policy": {
+    "connection_alias_normalization": "common model construction for every configuration",
     "stagnation_s": 3,
     "restart_round_caps_s": [
       5,
