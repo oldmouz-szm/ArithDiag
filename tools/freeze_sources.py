@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+"""Create a source-only integrity manifest after a reviewed source change."""
+from pathlib import Path
+import hashlib
+import json
+
+ROOT = Path(__file__).resolve().parents[1]
+INCLUDED = {".py", ".cpp", ".h", ".md", ".yml", ".yaml", ".txt", ".toml"}
+NAMES = {"Makefile", "LICENSE", ".gitignore", ".gitattributes"}
+DIRECTORIES = {
+    "src",
+    "ArithDiag-G",
+    "ArithDiag-LS",
+    "tests",
+    "tools",
+    "docs",
+    ".github",
+}
+paths = []
+for path in ROOT.rglob("*"):
+    relative = path.relative_to(ROOT)
+    if len(relative.parts) > 1 and relative.parts[0] not in DIRECTORIES:
+        continue
+    if not path.is_file() or any(
+        part.startswith(".") and part != ".github"
+        for part in path.relative_to(ROOT).parts[:-1]
+    ):
+        continue
+    if any(
+        part in {"build", "__pycache__", "results"}
+        for part in path.relative_to(ROOT).parts
+    ):
+        continue
+    if path.suffix in INCLUDED or path.name in NAMES:
+        paths.append(path)
+manifest = dict(
+    schema="arithdiag-source-v1",
+    version="0.2.0",
+    files={
+        str(p.relative_to(ROOT))
+        .replace("\\", "/"): hashlib.sha256(p.read_bytes())
+        .hexdigest()
+        for p in sorted(paths)
+    },
+)
+(ROOT / "SOURCE_MANIFEST.json").write_text(
+    json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+)
+print(json.dumps(dict(source_files=len(paths), manifest="SOURCE_MANIFEST.json")))
