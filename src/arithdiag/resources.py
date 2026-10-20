@@ -628,6 +628,8 @@ def execute(out, manifest):
             ARITHDIAG_ATTEMPT_TOKEN=token,
             ARITHDIAG_DATASET_ROOT=settings["dataset_roots"][run["dataset"]],
             ARITHDIAG_WORK_ROOT=str(directory),
+            ARITHDIAG_INTERNAL_BUDGET_POLICY=run["effective_configuration"].get("budget_policy", "fraction50"),
+            ARITHDIAG_VARIANT=run.get("variant", "full"),
             TMPDIR=str(directory),
             PYTHONDONTWRITEBYTECODE="1",
             PYTHONHASHSEED="0",
@@ -728,7 +730,7 @@ def execute(out, manifest):
                 pass
             stream.close()
         raw = read_worker(item["target"])
-        if item["run"]["method"].startswith("gurobi_"):
+        if item["run"]["method"] == "ArithDiag-G":
             lease_path = ROOT / ".state/wls-leases.json"
             leases = read(lease_path)
             for lease in leases:

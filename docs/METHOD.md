@@ -6,6 +6,9 @@ equation. Signal domains, connections and observed input/output segments remain
 mandatory. This is unsigned, single-observation, component-level weak-fault
 diagnosis. A returned diagnosis need not identify the injected fault locations.
 
+The common observation model stores these conditional equations directly.
+Big-M is an LS backend encoding, not the shared representation.
+
 ## Construction and reduction
 
 Unconditional equal bit segments are canonicalized while constructing the model.
@@ -50,9 +53,9 @@ Unknown consistency states receive cooldowns rather than unsound blocking clause
 
 The internal coordinator uses a verified incumbent and its own proved conflicts.
 Numerical native bounds never become premises of an internal integer proof.
-Productive proof steps earn additional scheduling credit: base accrual 10%,
-productive accrual 40%, cap 40% of the whole-process budget. All work remains
-subject to the same instance deadline.
+The frozen production policy allocates one nonrenewing ledger of 50% of the
+time remaining at internal entry. Initial and later work share this ledger and
+the same whole-worker deadline; see INTERNAL_BUDGET.md.
 
 ## ArithDiag-G
 
@@ -73,7 +76,7 @@ the deadline. Native reports are distinct from independently checked proof files
 
 The functional relation g=0 is guarded by two Big-M inequalities. M is computed
 from the legal integer domains, so AB=0 restores the equation and AB=1 releases
-it throughout those domains. The native LP reader is audited against the integer
+it throughout those domains. Only when LS is invoked are these pairs generated. The native LP reader is audited against the integer
 model. A redundant Big-M coefficient may be safely rounded outward only after
 proving redundancy at AB=1; restrictive rows never receive that treatment. A
 fixed-one auxiliary transports a nonrepresentable right-hand-side remainder

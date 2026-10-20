@@ -8,7 +8,7 @@ The witness and health/component sets are kept in worker memory only.
 import math, time
 from collections import defaultdict
 from arithdiag.preprocessing import normal_equations
-from arithdiag.integer_io import validate
+from arithdiag.model_io import validate
 
 
 class Stopped(Exception):

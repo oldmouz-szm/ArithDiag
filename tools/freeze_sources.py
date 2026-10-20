@@ -35,7 +35,7 @@ for path in ROOT.rglob("*"):
         paths.append(path)
 manifest = dict(
     schema="arithdiag-source-v1",
-    version="0.2.0",
+    version="0.4.0",
     files={
         str(p.relative_to(ROOT))
         .replace("\\", "/"): hashlib.sha256(p.read_bytes())
@@ -44,6 +44,6 @@ manifest = dict(
     },
 )
 (ROOT / "SOURCE_MANIFEST.json").write_text(
-    json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n"
 )
 print(json.dumps(dict(source_files=len(paths), manifest="SOURCE_MANIFEST.json")))

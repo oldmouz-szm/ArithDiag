@@ -50,6 +50,8 @@ def validate(model, values, solver_objective=None):
         if ref(c["target"]) != expr(c["source"]):
             errors.append(f"wiring: {c['name']}")
     for c in model["constraints"]:
+        if c["kind"] == "conditional_component" and values[c["abnormal"]] == 1:
+            continue
         lhs = sum(t["coef"] * values[t["var"]] for t in c["linear"])
         lhs += sum(
             t["coef"] * values[t["vars"][0]] * values[t["vars"][1]]

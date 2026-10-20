@@ -18,29 +18,36 @@ from arithdiag.preprocessing import (
     learn_conflicts,
 )
 from arithdiag.proof_coordinator import ProofCoordinator
+from arithdiag.internal_budget import selected_policy, policy_configuration, run_initial
+from arithdiag.variants import configuration as variant_configuration
 from native_adapter import run_backend
 
 
 def configuration():
+    allocation = policy_configuration(selected_policy())
+    features = variant_configuration()
     return dict(
         backend="adapted_LS-IQCQP",
         internal_policy="component_guided",
+        common_model="conditional_arithmetic_v2",
         structural=True,
         dominance=True,
         decomposition=True,
         joint_native_model=True,
-        initial_refinement_limit_s=0.35,
-        pre_encoding_proof_request_s=1.75,
+        initial_refinement_limit_s=0.35 if features["internal_proof_enhancement"] else 0.0,
+        pre_encoding_proof_request_s=allocation["initial_request_s"],
         proof_request_s=0.75,
         proof_interval_s=1.0,
         native_actions=True,
         native_restarts_s=[5, 10, 15],
         stagnation_s=3.0,
-        pause_native_during_internal_proof=True,
+        pause_native_during_internal_proof=features["internal_callbacks"],
         dynamic_proved_cuts=False,
         initial_static_cones_only=True,
         external_reference_input=False,
         reference_stopping=False,
+        **features,
+        **allocation,
     )
 
 
@@ -72,6 +79,7 @@ def main():
         invalid_candidate_count=0,
         callback_errors=0,
         native_invocations=0,
+        bigm_encoding_invocations=0,
         native_audit_invocations=0,
         native_component_attempts=0,
         native_component_accepted=0,
@@ -179,8 +187,10 @@ def main():
         if init is not None:
             accept(init, "circuit_initialisation")
         t = time.perf_counter()
-        refined, checks = learn_conflicts(
-            model, min(deadline - 0.03, t + 0.35), initial_conflicts=cores
+        features = result["configuration"]
+        refined, checks = (
+            learn_conflicts(model, min(deadline - 0.03, t + 0.35), initial_conflicts=cores)
+            if features["internal_proof_enhancement"] else (cores, 0)
         )
         result.update(
             initial_refinement_s=time.perf_counter() - t,
@@ -188,14 +198,28 @@ def main():
         )
         internal[0] = max(internal[0], conflict_bound(refined))
         lower(internal[0], "certified_initial_refinement")
-        coop = ProofCoordinator(
-            model, pre, refined, limit, internal[0], best[2], known_cores=cores
-        )
-        strengthen(1.75)
+        result["initial_phase_upper_before"] = best[1]
+        if features["internal_callbacks"]:
+            coop = ProofCoordinator(
+                model, pre, refined, limit, internal[0], best[2], known_cores=cores,
+                candidate_search=features["internal_candidate_search"],
+                proof_enhancement=features["internal_proof_enhancement"],
+            )
+            run_initial(coop, selected_policy(), deadline, result, strengthen, now)
+        else:
+            result.update(internal_budget_total_s=0.0, coordination_calls=0,
+                          coordination_candidates=0, coordination_new_conflicts=0,
+                          proof_strengthening_s=0.0, initial_phase_actual_s=0.0)
+        result["initial_phase_upper_after"] = best[1]
+        result["resolved_before_backend"] = False
         if certify():
+            result["resolved_before_backend"] = True
+            publish()
             return
         if now() >= limit - 0.05:
             raise TimeoutError()
+        result["backend_handoff_total_s"] = now()
+        publish()
         run_backend(
             ROOT,
             pre,

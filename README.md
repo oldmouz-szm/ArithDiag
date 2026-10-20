@@ -1,5 +1,12 @@
 # ArithDiag
 
+**v0.4.0 is the frozen final-test source. ArithDiag-LS is the main method;
+ArithDiag-G is an optional backend replacement adapter.** Formal experiments
+remain unstarted pending user approval. See the [frozen experiment protocol](docs/EXPERIMENT_PROTOCOL.md).
+The common model uses conditional arithmetic equations. Big-M is generated only
+when invoking the LS backend; the G backend compiles directly to digits and
+indicators. See [representation and validation boundaries](docs/SEMANTIC_MODEL.md).
+
 Component-level diagnosis of unsigned arithmetic circuits using integer models,
 circuit-based candidate construction, arithmetic repair and certified conflict bounds.
 
@@ -8,8 +15,11 @@ preprocessing, internal search, proof policy and exact original-model validator.
 
 | Configuration | Backend representation | Solver |
 |---|---|---|
-| **ArithDiag-G** | Radix-256 integer digits, exact carry equations and indicator constraints | Gurobi |
 | **ArithDiag-LS** | Bounded integer quadratic Big-M constraints with audited wide-coefficient transport | Adapted LS-IQCQP |
+| **ArithDiag-G** (optional) | Radix-256 integer digits, exact carry equations and indicator constraints | Gurobi |
+
+The encodings suit their respective backends. A comparison evaluates complete
+configurations; it does not isolate a solver change from a representation change.
 
 Each complete adder or multiplier has one unit-cost abnormality variable.
 Healthy components obey their function; faulty components may output any legal
@@ -44,13 +54,15 @@ Verilog. See [input and output formats](docs/INTERFACES.md).
 
 ```bash
 .venv/bin/python -B run.py \
-  --backend ArithDiag-G \
+  --backend ArithDiag-LS \
   --dataset-root /path/to/dataset \
-  --run-name example-g --instances nl_ring16_u8/observations_045 \
+  --run-name example-ls --instances nl_ring16_u8/observations_045 \
   --time-limit 120 --seeds 1
 ```
 
 This prepares and validates the manifest. Add **`--execute`** to start workers.
+The root entry point defaults to ArithDiag-LS/full. All examples without
+`--execute` prepare manifests only.
 Repeat the identical command with `--execute` to resume after an interruption.
 Use `--instances all` for the whole dataset; repeat `--dataset-root` to combine
 external datasets. Each backend also has its own entry point:
@@ -61,12 +73,37 @@ external datasets. Each backend also has its own entry point:
   --instances all --time-limit 120 --seeds 1 --execute
 ```
 
-Use `--concurrency 8 --cpus 0-7` for independent single-thread workers on eight
-configured CPUs. Both configurations can be scheduled with
+Use `--concurrency 6 --cpus 0-5` for independent single-thread workers on six
+configured CPUs, after checking physical topology and contention. Both configurations can be scheduled with
 `--backend ArithDiag-G ArithDiag-LS`; their results remain separate runs.
 Concurrency defaults to one, is capped at 100, and must not exceed the CPU list.
 Coordinate other users of the same Gurobi license; the local WLS scheduler permits
 at most two sessions and accounts for token expiry.
+
+## Frozen LS ablations
+
+| CLI variant | Active internal candidate search | Internal proof enhancement |
+| --- | --- | --- |
+| full | On | On |
+| no-internal-search | Off | On |
+| no-proof-enhancement | On | Off |
+| backend-only | Off | Off |
+
+All retain common preprocessing (including conservative dominance), circuit
+initialization, static observed-cone conflicts/basic bounds, adapted LS component
+actions, restarts and exact validation. Thus backend-only means after common
+preparation and initialization, not the original unmodified LS-IQCQP. Basic U=L
+can still finish an instance without LS. See [precise boundaries](docs/ABLATIONS.md).
+
+```bash
+# Preparation only; formal execution awaits approval
+.venv/bin/python -B run.py \
+  --dataset-root /path/to/dataset --run-name ls-ablations \
+  --variants full no-internal-search no-proof-enhancement backend-only \
+  --time-limit 120 --seeds 1,2,3
+```
+
+The G adapter supports full only and remains a backend replacement study.
 
 ## Search and proof
 
@@ -77,6 +114,11 @@ at most two sessions and accounts for token expiry.
 5. Stop when a verified upper bound equals a certified internal lower bound.
 6. Otherwise encode the residual model for the selected backend and continue budgeted internal reasoning during native search.
 7. Restore every candidate to the original circuit and check it with Python integers before scoring it.
+
+Initial and later internal work share one nonrenewing ledger of at most 50% of
+the time remaining at internal entry after common processing, less a deadline
+margin. Early return is allowed. This is an empirical scheduling parameter,
+not a theorem; see [budget accounting](docs/INTERNAL_BUDGET.md).
 
 Some instances finish before a native solver is invoked. `native_invocations`
 records this explicitly. ArithDiag-LS retains joint component moves, division and
@@ -123,6 +165,11 @@ Checks cover independent small-domain enumeration, connection normalization,
 partial buses, transformation minima, conflict reliability, hitting-set bounds,
 wide Big-M input audits, native component proposals, deadline scoring and recovery.
 See [method and correctness boundaries](docs/METHOD.md).
+The [general correctness obligations](docs/CORRECTNESS_OBLIGATIONS.md) remain
+necessary for the paper; tests do not substitute for those arguments.
+
+Old results remain archived under their original source versions. They must not
+be relabeled or pooled as final v0.4.0 experiments.
 
 Only ArithDiag source, tests, build instructions and documentation are included.
 The [benchmark](https://github.com/oldmouz-szm/MBD-Benchmark) is maintained separately.

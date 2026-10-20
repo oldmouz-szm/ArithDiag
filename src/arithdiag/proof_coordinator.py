@@ -6,7 +6,7 @@ is never used as a premise of an internal integer proof.
 
 import time
 
-_installed = False
+_installed = None
 
 
 def project_core(core, pre, components):
@@ -34,14 +34,17 @@ def project_core(core, pre, components):
 
 class ProofCoordinator:
     def __init__(
-        self, model, pre, cores, limit, initial_lower, incumbent, known_cores=None
+        self, model, pre, cores, limit, initial_lower, incumbent, known_cores=None,
+        *, candidate_search=True, proof_enhancement=True
     ):
         global _installed
-        if not _installed:
+        if _installed is None:
             from arithdiag import proof_policy
 
-            proof_policy.install("component_guided")
-            _installed = True
+            proof_policy.install("component_guided", candidate_search=candidate_search)
+            _installed = bool(candidate_search)
+        elif _installed != bool(candidate_search):
+            raise ValueError("Use a fresh worker for a different ablation policy")
         from arithdiag.adaptive_proof import AdaptiveIHSDriver
 
         self.model = model
@@ -51,6 +54,8 @@ class ProofCoordinator:
             model, pre, list(cores), total_limit_s=limit, inject_ls_cuts=False
         )
         self.driver.preferred = incumbent
+        self.driver.candidate_search_enabled = bool(candidate_search)
+        self.driver.proof_enhancement_enabled = bool(proof_enhancement)
         self.lower = initial_lower
         self.seen = set(map(frozenset, cores if known_cores is None else known_cores))
         self.pending = []

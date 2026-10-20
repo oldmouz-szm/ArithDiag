@@ -643,31 +643,13 @@ def _observation_values(path: Path, model: dict[str, Any]) -> dict[str, int]:
     return values
 
 
-def _polynomial_bounds(
-    constraint: dict[str, Any], variables: dict[str, dict[str, Any]]
-) -> tuple[int, int]:
-    lower = upper = 0
-    for item in constraint["linear"]:
-        variable = variables[item["var"]]
-        coefficient = item["coef"]
-        lower += coefficient * (variable["lb"] if coefficient >= 0 else variable["ub"])
-        upper += coefficient * (variable["ub"] if coefficient >= 0 else variable["lb"])
-    for item in constraint["quadratic"]:
-        a, b = (variables[name] for name in item["vars"])
-        coefficient = item["coef"]
-        low_product, high_product = a["lb"] * b["lb"], a["ub"] * b["ub"]
-        lower += coefficient * (low_product if coefficient >= 0 else high_product)
-        upper += coefficient * (high_product if coefficient >= 0 else low_product)
-    return lower, upper
-
-
 def build_observation_model(
     healthy_model: dict[str, Any], observation: Path
 ) -> dict[str, Any]:
     """Attach one observation and weak faults, with AB(c)=1 meaning faulty."""
     model = copy.deepcopy(healthy_model)
     port_values = _observation_values(observation, model)
-    model["schema"] = "arithdiag-observation-model-v1"
+    model["schema"] = "arithdiag-semantic-model-v2"
     model["observation"] = Path(observation).name
     model["observed_ports"] = port_values
     model["fault_header_used_as_constraints"] = False
@@ -697,32 +679,12 @@ def build_observation_model(
             raise ValueError(f"Unexpected base constraint: {constraint['name']}")
         component = constraint["component"]
         abnormal = f"AB_{component}"
-        lower, upper = _polynomial_bounds(constraint, variables)
-        m_positive, m_negative = max(0, upper), max(0, -lower)
-        for side, sign, big_m in (("pos", 1, m_positive), ("neg", -1, m_negative)):
-            linear = [
-                {"var": term["var"], "coef": sign * term["coef"]}
-                for term in constraint["linear"]
-            ]
-            if big_m:
-                linear.append({"var": abnormal, "coef": -big_m})
-            quadratic = [
-                {"vars": term["vars"], "coef": sign * term["coef"]}
-                for term in constraint["quadratic"]
-            ]
-            new_constraints.append(
-                {
-                    "name": f"guard_{side}_{component}",
-                    "kind": "guarded_component",
-                    "component": component,
-                    "abnormal": abnormal,
-                    "big_m": big_m,
-                    "sense": "le",
-                    "rhs": 0,
-                    "linear": linear,
-                    "quadratic": quadratic,
-                }
-            )
+        new_constraints.append(dict(
+            constraint,
+            name="conditional_" + component,
+            kind="conditional_component",
+            abnormal=abnormal,
+        ))
     for component in model["components"]:
         abnormal = f"AB_{component['name']}"
         if abnormal in variables:
@@ -760,5 +722,5 @@ def build_observation_model(
 def build_diagnostic_model(
     netlist: Path, observation: Path, library_dir: Path | None = None
 ) -> dict[str, Any]:
-    """Public interface: parse a circuit and one observation into an IQCQP."""
+    """Build backend-neutral weak-fault conditional arithmetic semantics."""
     return build_observation_model(build_model(netlist, library_dir), observation)

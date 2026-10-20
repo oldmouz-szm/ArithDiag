@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 import time
-from arithdiag.integer_io import ROOT, IQ, load_builder, validate, validation_failure
+from arithdiag.model_io import ROOT, IQ, load_builder, validate, validation_failure
 from arithdiag.model import circuit_wiring, signal_layout
 from arithdiag.dominance import top_level_search_components
 
@@ -45,26 +45,21 @@ def substitute(c, fixed, rename):
         terms={n: a for n, a in linear.items() if a},
         quadratic=[dict(a=a, b=b, coef=k) for (a, b), k in sorted(quad.items()) if k],
         sense=c["sense"],
+        ab=c.get("ab"),
         rhs=c["rhs"] - constant,
     )
 
 
+
 def normal_equations(model):
+    """Return hard wiring and directly stored healthy-conditional equations."""
     eq = []
     for c in model["constraints"]:
         if c["kind"] == "wiring":
             eq.append(dict(c, ab=None))
-        elif c["kind"] == "guarded_component" and c["name"].startswith("guard_pos_"):
-            eq.append(
-                dict(
-                    c,
-                    sense="eq",
-                    ab=c["abnormal"],
-                    linear=[t for t in c["linear"] if t["var"] != c["abnormal"]],
-                )
-            )
+        elif c["kind"] == "conditional_component":
+            eq.append(dict(c, ab=c["abnormal"]))
     return eq
-
 
 def transform(model, structural=False, dominance=False, decomposition=True):
     variables = {v["name"]: dict(v) for v in model["variables"]}
@@ -102,8 +97,18 @@ def transform(model, structural=False, dominance=False, decomposition=True):
     specs = {n: v for n, v in reps.items() if n not in fixed}
     residual = []
     for c in model["constraints"]:
+        ab = c.get("abnormal") if c["kind"] == "conditional_component" else None
+        if ab is not None and fixed.get(ab) == 1:
+            continue
         r = substitute(c, fixed, rename)
-        if not r["terms"] and not r["quadratic"]:
+        r["ab"] = ab if ab is not None and ab not in fixed else None
+        if r["ab"] is not None:
+            # A false constant function forces its guard faulty; it is not an
+            # unconditional contradiction. A true constant equation is redundant.
+            if not r["terms"] and not r["quadratic"] and r["rhs"] == 0:
+                continue
+            residual.append(r)
+        elif not r["terms"] and not r["quadratic"]:
             if not {"eq": 0 == r["rhs"], "le": 0 <= r["rhs"], "ge": 0 >= r["rhs"]}[
                 r["sense"]
             ]:
@@ -123,6 +128,7 @@ def transform(model, structural=False, dominance=False, decomposition=True):
         for c in residual:
             ns = sorted(
                 set(c["terms"]) | {n for t in c["quadratic"] for n in (t["a"], t["b"])}
+                | ({c["ab"]} if c.get("ab") else set())
             )
             for n in ns[1:]:
                 parent[find(n)] = find(ns[0])
@@ -133,7 +139,8 @@ def transform(model, structural=False, dominance=False, decomposition=True):
             if specs[n]["role"] == "abnormal":
                 g["components"].append(specs[n]["signal"])
         for c in residual:
-            ns = set(c["terms"]) | {n for t in c["quadratic"] for n in (t["a"], t["b"])}
+            ns = (set(c["terms"]) | {n for t in c["quadratic"] for n in (t["a"], t["b"])}
+                  | ({c["ab"]} if c.get("ab") else set()))
             roots = {find(n) for n in ns}
             assert len(roots) == 1
             groups[roots.pop()]["constraints"].append(c)

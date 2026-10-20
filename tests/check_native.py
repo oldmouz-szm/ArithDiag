@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "src"), str(ROOT / "ArithDiag-LS")]
 from check_correctness import toy
 from arithdiag.preprocessing import transform, initial, projected_initial, restore
-from arithdiag.integer_io import render, audit, exact_int
+from native_io import render, audit, exact_int
 from native_helpers import encode, metadata, local_check
 
 

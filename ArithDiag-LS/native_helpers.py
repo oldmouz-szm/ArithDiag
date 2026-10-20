@@ -1,6 +1,58 @@
 """Big-M encoding, arithmetic metadata and exact local candidate checks."""
 
-from arithdiag.integer_io import transport_constant_name
+from native_io import transport_constant_name
+from collections import defaultdict
+
+
+def lower_rows(specs, rows, source_model=None):
+    """Lower conditional equalities to redundant domain-derived guards, LS only."""
+    result = []
+    originals = {
+        c['component']: c for c in (source_model or {}).get('constraints', [])
+        if c['kind'] == 'conditional_component'
+    }
+    original_specs = {v['name']: v for v in (source_model or {}).get('variables', [])}
+    for c in rows:
+        ab = c.get("ab")
+        if ab is None:
+            result.append(dict(c))
+            continue
+        if c["sense"] != "eq" or ab in c["terms"]:
+            raise ValueError("Malformed conditional equation")
+        # Preserve the frozen coefficient policy for an interpretable old/new
+        # comparison: derive M from the original observation domains, but only
+        # here at LS invocation. No M value exists in the common model.
+        original = originals.get(c.get('component'))
+        domain = original_specs if original else specs
+        linear = defaultdict(int)
+        if original:
+            for t in original['linear']:
+                linear[t['var']] += t['coef']
+        else:
+            linear.update(c['terms'])
+        quadratic = ([dict(a=t['vars'][0], b=t['vars'][1], coef=t['coef'])
+                      for t in original['quadratic']] if original else c['quadratic'])
+        rhs = original['rhs'] if original else c['rhs']
+        lo = hi = 0
+        for n, k in linear.items():
+            v = domain[n]
+            lo += k * v["lb" if k >= 0 else "ub"]
+            hi += k * v["ub" if k >= 0 else "lb"]
+        for t in quadratic:
+            a, b, k = domain[t["a"]], domain[t["b"]], t["coef"]
+            if a["lb"] < 0 or b["lb"] < 0:
+                raise ValueError("Unsigned product domains required")
+            lo += k * (a["lb"]*b["lb"] if k >= 0 else a["ub"]*b["ub"])
+            hi += k * (a["ub"]*b["ub"] if k >= 0 else a["lb"]*b["lb"])
+        for side, sign, magnitude in (("pos",1,max(0,hi-rhs)),
+                                      ("neg",-1,max(0,rhs-lo))):
+            terms = {n:sign*k for n,k in c["terms"].items()}
+            if magnitude:
+                terms[ab] = -magnitude
+            result.append(dict(c, name="guard_"+side+"_"+c["name"],
+                kind="guarded_component", ab=None, sense="le", rhs=sign*c["rhs"],
+                terms=terms, quadratic=[dict(t,coef=sign*t["coef"]) for t in c["quadratic"]]))
+    return result
 
 
 def encode(pre, group):
@@ -10,7 +62,7 @@ def encode(pre, group):
     }
     specs = {names[n]: dict(pre["specs"][n], name=names[n]) for n in group["variables"]}
     g = dict(group, variables=list(specs), constraints=[])
-    for c in group["constraints"]:
+    for c in lower_rows(pre["specs"], group["constraints"], pre.get('model')):
         g["constraints"].append(
             dict(
                 c,
@@ -64,6 +116,8 @@ def local_check(pre, g, values):
         if not pre["specs"][n]["lb"] <= x <= pre["specs"][n]["ub"]:
             raise ValueError("Candidate domain")
     for c in g["constraints"]:
+        if c.get("ab") is not None and values[c["ab"]] == 1:
+            continue
         lhs = sum(a * values[n] for n, a in c["terms"].items()) + sum(
             t["coef"] * values[t["a"]] * values[t["b"]] for t in c["quadratic"]
         )

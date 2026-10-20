@@ -1,25 +1,7 @@
-"""Native-input equivalence audits and exact integer coefficient transport."""
-
-import os
-from pathlib import Path
+"""LS-only exact LP transport and native input audits."""
 from decimal import Decimal, getcontext
 
 getcontext().prec = 4096
-ROOT = Path(__file__).resolve().parents[2]
-from arithdiag import model as builder
-from arithdiag.validation import validate
-
-
-def load_builder():
-    return builder
-
-
-IQ = (
-    Path(os.environ.get("ARITHDIAG_DATASET_ROOT", str(ROOT / "data/benchmark")))
-    .expanduser()
-    .resolve()
-)
-
 
 def expression(terms):
     parts = []
@@ -158,13 +140,6 @@ def exact_int(x):
     if not d.is_finite() or d != d.to_integral_value():
         raise ValueError("Nonintegral numeric value")
     return int(d)
-
-
-def validation_failure(check):
-    """A log-safe error category/count; validator details remain transient."""
-    return "original_model_validation_failed; violation_count=" + str(
-        len(check.get("errors", ()))
-    )
 
 
 def canonical_monos(items):

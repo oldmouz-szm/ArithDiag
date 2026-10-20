@@ -15,9 +15,10 @@ import sys
 
 from arithdiag import __version__
 from arithdiag import resources as monitor
+from arithdiag.variants import VARIANTS
 
 ROOT = Path(__file__).resolve().parents[2]
-BACKENDS = ("ArithDiag-G", "ArithDiag-LS")
+BACKENDS = ("ArithDiag-LS", "ArithDiag-G")
 SAFE_NAME = re.compile(r"[A-Za-z0-9_.-]+\Z")
 INSTANCE = re.compile(r"[A-Za-z0-9_]+/observations_[0-9]+\Z")
 
@@ -85,7 +86,9 @@ def discover(root):
     return rows
 
 
-def backend_configuration(backend):
+def backend_configuration(backend, variant="full"):
+    if variant not in VARIANTS or (backend == "ArithDiag-G" and variant != "full"):
+        raise ValueError("Ablations are supported by the main LS configuration only")
     path = (
         ROOT
         / backend
@@ -96,12 +99,18 @@ def backend_configuration(backend):
     )
     module = importlib.util.module_from_spec(spec)
     before = list(sys.path)
+    previous_variant = os.environ.get("ARITHDIAG_VARIANT")
     try:
+        os.environ["ARITHDIAG_VARIANT"] = variant
         sys.path.insert(0, str(path.parent))
         spec.loader.exec_module(module)
         return module.configuration()
     finally:
         sys.path[:] = before
+        if previous_variant is None:
+            os.environ.pop("ARITHDIAG_VARIANT", None)
+        else:
+            os.environ["ARITHDIAG_VARIANT"] = previous_variant
 
 
 def prepare(args, out):
@@ -126,7 +135,13 @@ def prepare(args, out):
         or any(not INSTANCE.fullmatch(x) for x in selected)
     ):
         raise ValueError("Invalid or duplicate instance selection")
-    configurations = {name: backend_configuration(name) for name in args.backends}
+    variants = getattr(args, "variants", ["full"])
+    if not variants or len(set(variants)) != len(variants):
+        raise ValueError("Variants must be distinct and nonempty")
+    configurations = {
+        name + "/" + variant: backend_configuration(name, variant)
+        for name in args.backends for variant in variants
+    }
     roots = {}
     cases = []
     inputs = set()
@@ -199,7 +214,8 @@ def prepare(args, out):
     plan = []
     for seed in seeds:
         for row in cases:
-            for method in args.backends:
+            for config_key, effective in configurations.items():
+                method, variant = config_key.split("/")
                 cpu = cpus[len(plan) % len(cpus)]
                 run_id = (
                     row["dataset"]
@@ -207,6 +223,7 @@ def prepare(args, out):
                     + row["instance_id"].replace("/", "__")
                     + "__"
                     + method
+                    + "__" + variant
                     + "__s"
                     + str(seed)
                 )
@@ -216,7 +233,8 @@ def prepare(args, out):
                         run_id=run_id,
                         method=method,
                         configuration=method,
-                        effective_configuration=configurations[method],
+                        variant=variant,
+                        effective_configuration=effective,
                         seed=seed,
                         wave=0,
                         position=len(plan),
@@ -311,7 +329,7 @@ def prepare(args, out):
     return manifest
 
 
-def main(default_backend="ArithDiag-G"):
+def main(default_backend="ArithDiag-LS"):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--backend",
@@ -327,6 +345,8 @@ def main(default_backend="ArithDiag-G"):
         help="external dataset directory; repeat to combine datasets",
     )
     parser.add_argument("--run-name", required=True)
+    parser.add_argument("--variants", choices=tuple(VARIANTS), nargs="+", default=["full"],
+                        help="LS internal search/proof ablations; G supports full only")
     parser.add_argument("--output-root", type=Path, default=ROOT / "results")
     parser.add_argument("--time-limit", type=float, default=120.0)
     parser.add_argument("--concurrency", type=int, default=1)

@@ -27,6 +27,8 @@ class AdaptiveIHSDriver(ProofDriver):
         self.proof_cap_s = total_limit_s * 0.10
         self.unknown_states = OrderedDict()
         self.rotation = 0
+        self.candidate_search_enabled = True
+        self.proof_enhancement_enabled = True
         self.metrics.update(
             adaptive_calls=0,
             adaptive_queries=0,
@@ -82,6 +84,8 @@ class AdaptiveIHSDriver(ProofDriver):
         return state["attempts"]
 
     def step(self, lower, upper, healthy, budget_s):
+        if not self.proof_enhancement_enabled:
+            return self._search_only(lower, upper, budget_s)
         start = time.monotonic()
         allowed = self.available_budget(budget_s)
         self.metrics["adaptive_last_budget_s"] = allowed
@@ -194,3 +198,70 @@ class AdaptiveIHSDriver(ProofDriver):
             # The superclass updates this field itself. Replace that partial
             # amount with this call's complete wall time, counted exactly once.
             self.metrics["proof_strengthening_s"] = previous_spent + now - start
+
+    def _search_only(self, lower, upper, budget_s):
+        """Propose covers of static conflicts and repair signals, without proving.
+
+        Failed repair is UNKNOWN and excludes no cover. A refuted cover-size
+        query can move the *proposal size*, but never the published circuit
+        lower bound. No conflict extraction, learning or bound master is run.
+        The normal ledger field includes the complete internal work wall time.
+        """
+        if not self.candidate_search_enabled:
+            return lower
+        from arithdiag.arithmetic_repair import Repair
+
+        start = time.monotonic()
+        allowed = self.available_budget(budget_s)
+        if allowed <= 0 or lower >= upper:
+            return lower
+        previous_spent = self.metrics["proof_strengthening_s"]
+        deadline = start + allowed
+        self.metrics["search_only_calls"] = self.metrics.get("search_only_calls", 0) + 1
+        try:
+            k = max(lower, getattr(self, "proposal_size", lower))
+            while k < upper and time.monotonic() < deadline:
+                key = (frozenset(self.conflicts), k)
+                attempts = self._retry_state(key)
+                if attempts is None:
+                    break
+                edges = list(self.conflicts)
+                if edges:
+                    offset = self.rotation % len(edges)
+                    edges = edges[offset:] + edges[:offset]
+                    self.rotation += 1
+                captured = []
+                row = has_hitting_set_at_most(
+                    edges, k, deadline=deadline, max_nodes=200000,
+                    on_candidate=captured.append,
+                )
+                self.metrics["search_only_cover_calls"] = self.metrics.get("search_only_cover_calls", 0) + 1
+                self.metrics["search_only_cover_nodes"] = self.metrics.get("search_only_cover_nodes", 0) + row["nodes"]
+                if time.monotonic() >= deadline:
+                    break
+                if row["status"] == "UNSAT":
+                    k += 1
+                    self.proposal_size = k
+                    continue
+                if row["status"] != "SAT" or not captured:
+                    break
+                faulty = captured[0]
+                if len(faulty) > k or not faulty <= set(self.components):
+                    raise ValueError("Invalid search-only cover")
+                repair = getattr(self, "search_repair", None)
+                if repair is None:
+                    repair = self.search_repair = Repair(self.model, getattr(self, "preferred", None))
+                repair.preferred = getattr(self, "preferred", None)
+                witness = repair.find(
+                    frozenset(self.components) - faulty,
+                    time.perf_counter() + min(0.15, max(0.0, deadline - time.monotonic())),
+                    max_nodes=256,
+                )
+                self.metrics.update(repair.metrics)
+                if witness is not None and time.monotonic() < deadline:
+                    self.transient_candidate = witness
+                self._remember_unknown(key, attempts + 1)
+                break
+            return lower
+        finally:
+            self.metrics["proof_strengthening_s"] = previous_spent + time.monotonic() - start

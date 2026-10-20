@@ -3,7 +3,7 @@ import json, os, subprocess, sys, tempfile
 
 R = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(R / "src"), str(R / "ArithDiag-LS")]
-from arithdiag.integer_io import render, audit, native_values, exact_int
+from native_io import render, audit, native_values, exact_int
 from native_helpers import encode, metadata, local_check
 from native_adapter import consume_final_fragment
 from worker import configuration

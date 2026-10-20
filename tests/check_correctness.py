@@ -64,20 +64,9 @@ def toy(inputs, outputs, bypass):
         q = [dict(vars=[aa, bb], coef=-1)] if co["operation"] == "multiply" else []
         if not q:
             terms.extend([dict(var=aa, coef=-1), dict(var=bb, coef=-1)])
-        for side, sgn in [("pos", 1), ("neg", -1)]:
-            cs.append(
-                dict(
-                    name="guard_" + side + "_" + n,
-                    kind="guarded_component",
-                    component=n,
-                    abnormal="AB_" + n,
-                    sense="le",
-                    rhs=0,
-                    linear=[dict(var=t["var"], coef=sgn * t["coef"]) for t in terms]
-                    + [dict(var="AB_" + n, coef=-64)],
-                    quadratic=[dict(vars=t["vars"], coef=sgn * t["coef"]) for t in q],
-                )
-            )
+        cs.append(dict(name="conditional_"+n, kind="conditional_component",
+            component=n, abnormal="AB_"+n, sense="eq", rhs=0,
+            linear=terms, quadratic=q))
     return dict(
         variables=specs,
         components=comps,
@@ -160,6 +149,8 @@ def check_builder_aliases():
                 x = dict(fixed, **{v["name"]: value for v, value in zip(free, values)})
 
                 def row(c):
+                    if c["kind"] == "conditional_component" and x[c["abnormal"]] == 1:
+                        return True
                     lhs = sum(t["coef"] * x[t["var"]] for t in c["linear"]) + sum(
                         t["coef"] * x[t["vars"][0]] * x[t["vars"][1]]
                         for t in c["quadratic"]
@@ -278,7 +269,7 @@ u_arrmul4 M0 (.a(t), .b(t), .u_arrmul4_out(y));"""
             model = build("repeated" + str(y), ports, body, dict(a=1), dict(y=y))
             check(model, "y", {(y, ab) for ab in (0, 1) if ab or y == 225})
             healthy = next(
-                c for c in model["constraints"] if c["name"] == "guard_pos_M0"
+                c for c in model["constraints"] if c["name"] == "conditional_M0"
             )
             assert healthy["quadratic"] == [dict(vars=["a", "a"], coef=-225)]
     return counts

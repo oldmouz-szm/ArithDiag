@@ -1,4 +1,4 @@
-"""Independent finite arithmetic semantics vs the actual focused cooperation.
+"""Independent finite semantics for the internal search/proof coordinator.
 
 No original validator is used to determine the ground-truth optimum/supports.
 Synthetic witnesses and component sets stay in RAM; output is aggregate counts.
@@ -6,7 +6,7 @@ Synthetic witnesses and component sets stay in RAM; output is aggregate counts.
 
 from pathlib import Path
 from collections import Counter
-import itertools, json, os, random, sys, time
+import argparse, itertools, json, os, random, sys, time
 
 R = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(R / "src"))
@@ -21,6 +21,12 @@ from arithdiag.preprocessing import (
 from arithdiag.proof_coordinator import ProofCoordinator
 from arithdiag.conflicts import explain_conflict
 from arithdiag import component_master
+from arithdiag.variants import configuration as variant_configuration
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--variant", choices=("full", "no-internal-search", "no-proof-enhancement"), default="full")
+args = parser.parse_args()
+features = variant_configuration(args.variant)
 
 rng = random.Random(2026101807)
 count = Counter()
@@ -84,22 +90,9 @@ def fixture(i):
             lin.extend([dict(var=a, coef=-1), dict(var=b, coef=-1)])
         else:
             quad = [dict(vars=[a, b], coef=-1)]
-        for side, sign in (("pos", 1), ("neg", -1)):
-            rows.append(
-                dict(
-                    name="guard_" + side + "_" + c,
-                    kind="guarded_component",
-                    component=c,
-                    abnormal="AB_" + c,
-                    sense="le",
-                    rhs=0,
-                    linear=[dict(var=t["var"], coef=sign * t["coef"]) for t in lin]
-                    + [dict(var="AB_" + c, coef=-65536)],
-                    quadratic=[
-                        dict(vars=t["vars"], coef=sign * t["coef"]) for t in quad
-                    ],
-                )
-            )
+        rows.append(dict(name="conditional_"+c, kind="conditional_component",
+            component=c, abnormal="AB_"+c, sense="eq", rhs=0,
+            linear=lin, quadratic=quad))
     model = dict(
         variables=specs,
         components=components,
@@ -197,7 +190,11 @@ for i in range(220):
         _, upper = restore(pre, {k: complete[k] for k in pre["specs"]})
         best = [complete, upper]
         lower = conflict_bound(cores)
-        coop = ProofCoordinator(model, pre, list(cores), 120, lower, complete)
+        coop = ProofCoordinator(
+            model, pre, list(cores), 120, lower, complete,
+            candidate_search=features["internal_candidate_search"],
+            proof_enhancement=features["internal_proof_enhancement"],
+        )
 
         def accept(candidate, origin):
             full, k = restore(pre, candidate)
@@ -212,6 +209,15 @@ for i in range(220):
                 best[0], best[1], 0.025, time.perf_counter() + 0.1, accept
             )
             assert lower <= actual <= optimum <= best[1], "Unsound focused bound"
+            if not features["internal_proof_enhancement"]:
+                assert actual == lower and set(coop.driver.conflicts) == set(cores)
+                assert coop.driver.metrics["ihs_refuted_cardinality_queries"] == 0
+                assert coop.driver.metrics["ihs_new_conflicts"] == 0
+                assert coop.driver.metrics["proof_master_calls"] == 0
+                assert coop.driver.metrics["proof_refutation_checks"] == 0
+            if not features["internal_candidate_search"]:
+                assert coop.telemetry()["coordination_candidates"] == 0
+                assert coop.driver.metrics.get("repair_calls", 0) == 0
             for c in coop.driver.conflicts:
                 sound(c)
             if actual == best[1]:
@@ -273,7 +279,9 @@ out = dict(
     counts=dict(count),
     elapsed_s=time.perf_counter() - start,
     ground_truth="independent exhaustive unsigned signal arithmetic; not the original candidate validator",
-    runtime_variant="component_guided with reduced master, part cache, repair and adaptive quota",
+    runtime_variant=args.variant,
 )
+if features["internal_candidate_search"]:
+    assert count["independent_repair_witnesses"] > 0, "Active search never produced a checked witness"
 
 print(json.dumps(out))

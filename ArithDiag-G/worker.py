@@ -18,8 +18,9 @@ from arithdiag.preprocessing import (
     learn_conflicts,
 )
 from configuration import PARAMS, configuration
-from limb_model import Encoding, guard_audit
+from limb_model import Encoding, semantic_audit
 from arithdiag.proof_coordinator import ProofCoordinator
+from arithdiag.internal_budget import selected_policy, run_initial
 import gurobipy as gp
 from gurobipy import GRB
 
@@ -56,6 +57,7 @@ def main():
         numeric_warning_categories=[],
         native_bounds_trusted=True,
         native_invocations=0,
+        bigm_encoding_invocations=0,
         license_session_started=False,
         proof_cuts_root=0,
         proof_cuts_callback=0,
@@ -176,12 +178,19 @@ def main():
         coop = ProofCoordinator(
             model, pre, refined, limit, internal[0], best[2], known_cores=cores
         )
-        strengthen(1.75)
+        result["initial_phase_upper_before"] = best[1]
+        run_initial(coop, selected_policy(), deadline, result, strengthen, now)
+        result["initial_phase_upper_after"] = best[1]
+        result["resolved_before_backend"] = False
         if certify_internal():
+            result["resolved_before_backend"] = True
+            publish()
             return
         if now() >= limit - 0.05:
             raise TimeoutError()
-        result["original_guard_audit"] = guard_audit(model)
+        result["backend_handoff_total_s"] = now()
+        publish()
+        result["original_semantic_audit"] = semantic_audit(model)
         t = time.perf_counter()
         env = None
         if env is None:

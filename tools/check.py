@@ -21,6 +21,9 @@ checks = [
     (name, [])
     for name in [
         "check_release.py",
+        "check_semantic_ir.py",
+        "check_internal_budget.py",
+        "check_g_encoding_offline.py",
         "check_correctness.py",
         "check_proof_policy.py",
         "check_hitting_bound.py",
@@ -28,12 +31,15 @@ checks = [
         "check_runner.py",
     ]
 ]
+checks += [("check_proof_policy.py", ["--variant", variant])
+           for variant in ("no-internal-search", "no-proof-enhancement")]
 if args.native:
     checks += [
         (name, [])
-        for name in ["check_bigm_transport.py", "check_native.py", "check_adapter.py"]
+        for name in ["check_bigm_transport.py", "check_native.py", "check_adapter.py", "check_handoff.py"]
     ]
-    checks += [("check_cli.py", ["--backend", "ArithDiag-LS"])]
+    checks += [("check_cli.py", ["--backend", "ArithDiag-LS", "--variants", "full",
+                                "no-internal-search", "no-proof-enhancement", "backend-only"])]
 if args.gurobi:
     checks += [
         ("check_gurobi_encoding.py", []),

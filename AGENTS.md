@@ -1,6 +1,7 @@
 # ArithDiag source maintenance
 
-Production configurations are ArithDiag-G and ArithDiag-LS. Both use the common
+The main configuration is ArithDiag-LS; ArithDiag-G is an optional adapter.
+Both use the common
 integer modeling, preprocessing, arithmetic repair, proof and validation modules.
 Keep one implementation of that common algorithm. Do not reintroduce experimental
 dispatchers, competing baseline code, machine-specific paths or benchmark data.
@@ -20,3 +21,7 @@ experiments require a fresh batch and cannot be pooled with old-code records.
 Use private environments. Keep default host memory protection at 2 GiB, with
 2.5 GiB required before worker startup. Preserve single-thread workers, exclusive
 configured CPUs, process-group RSS monitoring and interruption/recovery journals.
+
+The v0.4.0 final-test protocol is docs/EXPERIMENT_PROTOCOL.md. Keep the four LS
+variants in docs/ABLATIONS.md and fraction50 budget fixed. Formal experiments
+require separate user approval; correctness/fixture regressions do not start them.

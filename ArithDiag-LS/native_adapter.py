@@ -2,7 +2,7 @@
 
 import hashlib, json, os, select, signal, subprocess, time
 from pathlib import Path
-from arithdiag.integer_io import render, audit, exact_int, native_values
+from native_io import render, audit, exact_int, native_values
 from native_helpers import encode, metadata, local_check
 
 
@@ -31,6 +31,8 @@ def run_backend(
     )
     t = time.perf_counter()
     specs, encoded, names = encode(pre, group)
+    result['bigm_encoding_invocations'] += 1
+    result['ls_encoded_constraints'] = len(encoded['constraints'])
     reverse = {v: k for k, v in names.items()}
     text = render(specs, encoded)
     result["native_model_sha256"] = hashlib.sha256(text.encode()).hexdigest()
@@ -166,7 +168,8 @@ def run_backend(
                 if p.poll() is not None:
                     why = "native_exit"
                     break
-                if time.perf_counter() - last_proof >= 1.0 and best[2] is not None:
+                if (result["configuration"].get("internal_callbacks", True)
+                    and time.perf_counter() - last_proof >= 1.0 and best[2] is not None):
                     tick = time.perf_counter()
                     before = best[1]
                     suspended = False

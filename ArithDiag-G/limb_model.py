@@ -24,60 +24,29 @@ def digits(x):
     return out or [0]
 
 
-def guard_audit(model):
+
+def semantic_audit(model):
     specs = {v["name"]: v for v in model["variables"]}
-    seen = defaultdict(list)
+    seen = set()
     for row in model["constraints"]:
         if row["kind"] == "observation":
-            assert (
-                row["sense"] == "eq"
-                and not row["quadratic"]
-                and len(row["linear"]) == 1
-            )
+            assert row["sense"] == "eq" and not row["quadratic"] and len(row["linear"]) == 1
             t = row["linear"][0]
             s = specs[t["var"]]
             assert s["lb"] == s["ub"] and t["coef"] * s["lb"] == row["rhs"]
         elif row["kind"] == "wiring":
             assert row["sense"] == "eq"
-        elif row["kind"] == "guarded_component":
-            assert row["sense"] == "le"
+        elif row["kind"] == "conditional_component":
             ab = row["abnormal"]
-            upper = 0
-            for t in row["linear"]:
-                s = specs[t["var"]]
-                lo = hi = 1 if t["var"] == ab else None
-                if t["var"] != ab:
-                    lo, hi = s["lb"], s["ub"]
-                upper += max(t["coef"] * lo, t["coef"] * hi)
-            for t in row["quadratic"]:
-                a, b = (specs[n] for n in t["vars"])
-                vals = [
-                    t["coef"] * x * y
-                    for x in (a["lb"], a["ub"])
-                    for y in (b["lb"], b["ub"])
-                ]
-                upper += max(vals)
-            assert upper <= row["rhs"], "guard insufficient on legal domain"
-            sig = (
-                tuple(
-                    sorted(
-                        (t["var"], t["coef"]) for t in row["linear"] if t["var"] != ab
-                    )
-                ),
-                tuple(sorted((tuple(t["vars"]), t["coef"]) for t in row["quadratic"])),
-                row["rhs"],
-            )
-            seen[ab].append(sig)
+            assert ab == "AB_" + row["component"] and ab not in seen
+            assert specs[ab]["type"] == "binary" and row["sense"] == "eq"
+            assert all(t["var"] != ab for t in row["linear"])
+            assert all(ab not in t["vars"] for t in row["quadratic"])
+            seen.add(ab)
         else:
-            raise ValueError("Unsupported original row category")
-    for rows in seen.values():
-        assert len(rows) == 2
-        a, b = rows
-        assert a[2] == -b[2]
-        assert dict(a[0]) == {n: -k for n, k in b[0]}
-        assert dict(a[1]) == {n: -k for n, k in b[1]}
-    return dict(original_guard_pairs=len(seen), relaxation_domains_audited=True)
-
+            raise ValueError("Unsupported semantic row category")
+    assert seen == {"AB_"+c["name"] for c in model["components"]}
+    return dict(conditional_components=len(seen), backend_neutral_semantics_audited=True)
 
 class Encoding:
     def __init__(self, pre, env, deadline):

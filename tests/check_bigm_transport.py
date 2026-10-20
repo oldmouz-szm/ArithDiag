@@ -10,8 +10,8 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-from arithdiag.integer_io import (
+sys.path[:0] = [str(ROOT / "src"), str(ROOT / "ArithDiag-LS")]
+from native_io import (
     audit,
     canonical_monos,
     render,
