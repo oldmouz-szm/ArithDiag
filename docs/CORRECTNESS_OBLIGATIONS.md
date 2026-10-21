@@ -15,10 +15,17 @@ The paper and artifact must state and justify these assumptions and invariants.
    conditions; residual decomposition must include shared AB variables.
 4. Every conflict has a sound original-model support; incomplete interval/factor
    reasoning returns UNKNOWN. Track which arithmetic checks are exhaustive.
+   Shared-product cancellation requires its positive-product premises; rational
+   affine paths, bounds, cycle contradictions and integer roots must carry every
+   healthy assumption used. Zero products do not permit cancellation.
 5. Projecting conflicts into the minimum-preserving reduced domain is sound for
    optimum bounds. Disjoint conflict parts add; caches require identical normalized
    conflict families. Completed master refutations alone raise L. UNKNOWN never
    creates blockers. Search-only proposal sizes are not published lower bounds.
+   Resumable DFS frames and residual UNSAT facts are valid only for the same
+   immutable edge family. Interruptions cannot promote partial work to UNSAT.
+   A larger auxiliary cover is not SAT at a smaller target k, and refuting that
+   cover does not by itself refute all size-k circuit diagnoses.
 6. Every accepted U comes from exact restoration and full original integer
    verification. Native numerical lower bounds cannot be internal proof premises.
    U=L proves minimum cardinality, not identification of the injected fault set.

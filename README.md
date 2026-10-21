@@ -1,6 +1,6 @@
 # ArithDiag
 
-**v0.4.0 is the frozen final-test source. ArithDiag-LS is the main method;
+**v0.5.0 is the frozen final-test source. ArithDiag-LS is the main method;
 ArithDiag-G is an optional backend replacement adapter.** Formal experiments
 remain unstarted pending user approval. See the [frozen experiment protocol](docs/EXPERIMENT_PROTOCOL.md).
 The common model uses conditional arithmetic equations. Big-M is generated only
@@ -55,21 +55,33 @@ Verilog. See [input and output formats](docs/INTERFACES.md).
 ```bash
 .venv/bin/python -B run.py \
   --backend ArithDiag-LS \
-  --dataset-root /path/to/dataset \
+  --dataset-root /path/to/MBD-Benchmark/final576_v1 \
   --run-name example-ls --instances nl_ring16_u8/observations_045 \
   --time-limit 120 --seeds 1
 ```
 
 This prepares and validates the manifest. Add **`--execute`** to start workers.
-The root entry point defaults to ArithDiag-LS/full. All examples without
+The root entry point defaults to ArithDiag-LS/full with **interleaved50**:
+at most five initial internal seconds, then LS rounds and internal work sharing
+one nonrenewing 50% ledger. The optional environment override
+`ARITHDIAG_INTERNAL_BUDGET_POLICY=fraction50` is for explicit legacy reproduction;
+the final protocol uses interleaved50. All examples without
 `--execute` prepare manifests only.
 Repeat the identical command with `--execute` to resume after an interruption.
 Use `--instances all` for the whole dataset; repeat `--dataset-root` to combine
-external datasets. Each backend also has its own entry point:
+external datasets. The final evaluation list is the external
+[ArithDiag-Final576-v1](https://github.com/oldmouz-szm/MBD-Benchmark/tree/v2.0.0/final576_v1)
+snapshot: **576 observations, 36 circuits, 192 physical fault groups**. Pin
+MBD-Benchmark commit `eec655263e3c388211e75b8cc4e69b78396a6c37` and pass its
+`final576_v1/` directory. The benchmark repository's root index still describes
+the legacy 450 tasks. Final576 is a disclosed runtime-informed development
+selection from 918 tasks; it is not an unseen test set.
+
+Each backend also has its own entry point:
 
 ```bash
 .venv/bin/python -B ArithDiag-LS/run.py \
-  --dataset-root /path/to/dataset --run-name example-ls \
+  --dataset-root /path/to/MBD-Benchmark/final576_v1 --run-name example-ls \
   --instances all --time-limit 120 --seeds 1 --execute
 ```
 
@@ -98,7 +110,7 @@ can still finish an instance without LS. See [precise boundaries](docs/ABLATIONS
 ```bash
 # Preparation only; formal execution awaits approval
 .venv/bin/python -B run.py \
-  --dataset-root /path/to/dataset --run-name ls-ablations \
+  --dataset-root /path/to/MBD-Benchmark/final576_v1 --run-name ls-ablations \
   --variants full no-internal-search no-proof-enhancement backend-only \
   --time-limit 120 --seeds 1,2,3
 ```
@@ -112,9 +124,12 @@ The G adapter supports full only and remains a backend replacement study.
 3. Construct and exactly validate a circuit-based initial candidate.
 4. Use proved conflicts, a reduced hitting-set master and bounded arithmetic repair to improve bounds and candidates.
 5. Stop when a verified upper bound equals a certified internal lower bound.
-6. Otherwise encode the residual model for the selected backend and continue budgeted internal reasoning during native search.
+6. Otherwise encode the residual model for the selected backend. LS alternates
+   completed native rounds with budgeted internal reasoning; G uses its callbacks.
 7. Restore every candidate to the original circuit and check it with Python integers before scoring it.
 
+The initial internal request is at most five seconds. Later LS-side internal
+work runs between native rounds; a stagnation event can advance unused credit.
 Initial and later internal work share one nonrenewing ledger of at most 50% of
 the time remaining at internal entry after common processing, less a deadline
 margin. Early return is allowed. This is an empirical scheduling parameter,
@@ -162,14 +177,15 @@ regenerating that manifest with `tools/freeze_sources.py` and starting a new bat
 ```
 
 Checks cover independent small-domain enumeration, connection normalization,
-partial buses, transformation minima, conflict reliability, hitting-set bounds,
+partial buses, transformation minima, conflict reliability, shared-product
+relations, interrupted/resumed hitting-set search, interleaved-budget accounting,
 wide Big-M input audits, native component proposals, deadline scoring and recovery.
 See [method and correctness boundaries](docs/METHOD.md).
 The [general correctness obligations](docs/CORRECTNESS_OBLIGATIONS.md) remain
 necessary for the paper; tests do not substitute for those arguments.
 
 Old results remain archived under their original source versions. They must not
-be relabeled or pooled as final v0.4.0 experiments.
+be relabeled or pooled as final v0.5.0 experiments.
 
 Only ArithDiag source, tests, build instructions and documentation are included.
 The [benchmark](https://github.com/oldmouz-szm/MBD-Benchmark) is maintained separately.

@@ -10,6 +10,8 @@ All returned data are scalar metrics; component identities remain in memory.
 from __future__ import annotations
 
 import time
+import os
+FAST_MASTER = os.environ.get("ARITHDIAG_FAST_MASTER", "1") == "1"
 from dataclasses import dataclass
 from typing import Callable, Hashable, Iterable
 
@@ -100,8 +102,12 @@ class _Engine:
         # An UNSAT state with k available selections also refutes every smaller k.
         self.unsat: dict[int, int] = {}
         self.last_solution: tuple[int, ...] | None = None
+        self.greedy_solution: tuple[int, ...] = ()
+        self.packing_cache = {}
 
     def packing(self, remaining: int) -> int:
+        if FAST_MASTER and remaining in self.packing_cache:
+            return self.packing_cache[remaining]
         best = 0
         for order in (self.edge_order, reversed(self.edge_order)):
             available = remaining
@@ -111,18 +117,41 @@ class _Engine:
                     count += 1
                     available &= ~self.neighbours[index]
             best = max(best, count)
+        if FAST_MASTER and remaining == self.full:
+            # A feasible fractional packing is a dual certificate. Capacities
+            # and weights are scaled integers, so the ceiling uses no floats.
+            for denominator in (2, 4):
+                for order in (self.edge_order, list(reversed(self.edge_order))):
+                    capacity = {cover: denominator for cover in self.covers}
+                    units = 0
+                    for _ in range(denominator):
+                        for index in order:
+                            self.budget.check()
+                            incident = self.by_edge[index]
+                            if all(capacity[cover] > 0 for cover in incident):
+                                for cover in incident:
+                                    capacity[cover] -= 1
+                                units += 1
+                    best = max(best, (units + denominator - 1) // denominator)
+        if FAST_MASTER:
+            if len(self.packing_cache) >= 8192:
+                self.packing_cache.clear()
+            self.packing_cache[remaining] = best
         return best
 
     def greedy_upper(self) -> int:
         remaining = self.full
         count = 0
+        chosen = []
         while remaining:
             self.budget.check()
             cover = max(
                 self.covers, key=lambda candidate: (candidate & remaining).bit_count()
             )
             remaining &= ~cover
+            chosen.append(cover)
             count += 1
+        self.greedy_solution = tuple(chosen)
         return count
 
     def decision(self, remaining: int, k: int) -> int | None:
@@ -158,9 +187,20 @@ class _Engine:
             if not any(cover & other == cover for other in maximal):
                 maximal.append(cover)
 
-        max_coverage = max((cover & remaining).bit_count() for cover in self.covers)
-        capacity_bound = (remaining.bit_count() + max_coverage - 1) // max_coverage
-        if max(capacity_bound, self.packing(remaining)) > k:
+        if FAST_MASTER:
+            # ceil(|R|/max_cover)>k iff every cover hits fewer than ceil(|R|/k).
+            # A single sufficiently large cover disproves this pruning test;
+            # finding the exact maximum at every branch is unnecessary.
+            threshold = (remaining.bit_count() + k - 1) // k
+            impossible = self.packing(remaining) > k
+            if not impossible:
+                impossible = not any((cover & remaining).bit_count() >= threshold
+                                     for cover in self.covers)
+        else:
+            max_coverage = max((cover & remaining).bit_count() for cover in self.covers)
+            capacity_bound = (remaining.bit_count() + max_coverage - 1) // max_coverage
+            impossible = max(capacity_bound, self.packing(remaining)) > k
+        if impossible:
             self.unsat[remaining] = max(k, self.unsat.get(remaining, -1))
             return None
 
@@ -244,6 +284,7 @@ def improve_bound(
     target_upper: int | None = None,
     deadline: float | None = None,
     max_nodes: int | None = None,
+    on_candidate: Callable[[frozenset], None] | None = None,
 ) -> dict:
     """Raise a reliable diagnosis lower bound using already proved conflicts.
 
@@ -273,15 +314,22 @@ def improve_bound(
         budget.check()
         if infeasible:
             status, exact, evidence = "INFEASIBLE", True, "empty_proved_conflict"
+        elif not edges:
+            if on_candidate is not None:
+                budget.check()
+                on_candidate(frozenset())
         elif edges:
             conflict_lower = max(
                 _packing(edges, range(len(edges))),
                 _packing(edges, reversed(range(len(edges)))),
             )
-            evidence = "disjoint_proved_conflicts"
+            evidence = "exact_rational_conflict_packing" if FAST_MASTER else "disjoint_proved_conflicts"
             engine = _Engine(edges, budget)
             conflict_lower = max(conflict_lower, engine.packing(engine.full))
             auxiliary_upper = engine.greedy_upper()
+            if on_candidate is not None:
+                budget.check()
+                on_candidate(frozenset(engine.representatives[c] for c in engine.greedy_solution))
             exact = conflict_lower == auxiliary_upper
             k = max(current_lower, conflict_lower)
             while not exact and (target_upper is None or k < target_upper):
@@ -291,6 +339,9 @@ def improve_bound(
                 result = engine.decision(engine.full, k)
                 if result is not None:
                     auxiliary_upper = min(auxiliary_upper, result)
+                    if on_candidate is not None:
+                        budget.check()
+                        on_candidate(frozenset(engine.representatives[c] for c in engine.last_solution))
                     status = "SAT"
                     exact = conflict_lower == auxiliary_upper
                     break

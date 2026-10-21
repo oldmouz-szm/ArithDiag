@@ -1,39 +1,43 @@
-# v0.4.0 final-test freeze
+# v0.5.0 final-test freeze
 
-ArithDiag-LS is the default main configuration; ArithDiag-G remains an optional
-backend replacement adapter. The common observation model stores conditional
-integer equations without Big-M. LS generates Big-M only on invocation; G compiles
-integer digits and indicators. The production internal budget is fraction50.
+ArithDiag-LS/full is the main method; ArithDiag-G/full is an optional backend
+replacement. The default policy is interleaved50, matching the reviewed
+v0.4.10.dev1 experiment configuration. Only the policy default, version/manifest
+generation, regression entry and release documentation are changed in this
+engineering promotion. The relational proof, resumable master, preprocessing,
+repair, LS native actions and acceptance implementations are retained.
 
-The complete algorithm is retained from the tested conditional-model/fraction50
-development snapshot. This release adds explicit internal search/proof ablation
-gates, configuration identity and documentation, without retuning the full
-algorithm, native component moves, conflict acceptance or resource guards.
-Legacy budget choices and the external RC2 dispatch label are not exposed.
+The external final data is ArithDiag-Final576-v1: MBD-Benchmark v2.0.0, commit
+eec655263e3c388211e75b8cc4e69b78396a6c37, directory final576_v1. Its 576 tasks
+cover 36 circuits and 192 fault groups. Selection uses historical runtimes and
+must be disclosed. No data or competing baseline code is included here.
 
-The main-paper ablations are no-internal-search, no-proof-enhancement and
-backend-only. Common preprocessing, initialization and basic bounds remain on.
-G supports full only. See EXPERIMENT_PROTOCOL.md and ABLATIONS.md for exact scope.
+The four LS variants remain full, no-internal-search, no-proof-enhancement and
+backend-only. Common preprocessing, initialization, static/basic bounds, LS
+actions and validation stay enabled. Backend-only is not raw LS. Legacy
+fraction50 is retained as an explicit compatibility override; the final protocol
+uses interleaved50 for every applicable configuration.
 
-Correctness validation on Linux with Python 3.14.4 includes:
+## Release gate
 
-- 128 independently enumerated models, 384 transformation checks and 1024 conflict
-  checks, plus connection/partial-bus regressions.
-- Conditional-model vs LS encoding checks on 1664 assignments and wide boundaries.
-- Full, search-disabled and proof-disabled coordinators each checked on 220 finite
-  circuits, 660 reduced-domain checks and 1980 internal steps against independent
-  exhaustive signal semantics; returned witnesses and lower bounds are checked.
-- Independent hitting-set enumeration, UNKNOWN/deadline regressions, 65-bit Big-M
-  transport audits, native witness and component-move checks.
-- Eight fresh-worker cases across four variants, exact certificates and no-rerun
-  recovery, plus four fan-out cases requiring real LS handoff when search is off.
-- Offline G encoding checks using the actual builder with a recording stub:
-  256 small and 10 wide assignments. No SDK optimization or license session used.
+Run tools/check.py --native on Linux in fresh test processes. This includes
+source/version integrity, conditional-model/encoding equivalence, 128 independent
+models and 384 transformations, conflict and hitting-set ground truth, relation
+supports, resumable/changed-family master state, fake-clock interleaved budget
+and stagnation advance, 65-bit Big-M boundaries, native witnesses/actions, and
+fresh-worker four-variant/recovery checks. The default entry now includes
+check_schedule.py, check_master.py and check_affine.py. Offline G checks use a
+recording stub and never acquire a license. Live G checks remain explicitly
+opt-in and are not implied by passing the LS release gate.
 
-The implementation checks are not a substitute for the general arguments listed
-in CORRECTNESS_OBLIGATIONS.md. Native G optimization was not retested during this
-freeze; its existing guards/encoding remain and its live regression is opt-in.
+Rebuild LS from source, compare its binary and core implementation to the
+reviewed candidate, check final576 data discovery and preparation without
+--execute, and repeat regressions from the clean Git archive. The source-only
+Git tag and SOURCE_MANIFEST.json are the published locks; compiler/options and
+binary hashes are additionally recorded in each external execution manifest.
 
-Source integrity is frozen in SOURCE_MANIFEST.json and the release Git tag.
-Historical code/results remain unchanged and must not be relabeled as v0.4.0.
-No formal batch was started for this release; execution awaits explicit approval.
+Tests do not replace the general arguments in CORRECTNESS_OBLIGATIONS.md or
+independent proof-certificate checking. Historical results keep their original
+versions and cannot be relabeled as v0.5.0 results. No formal benchmark is
+authorized or launched by this release. See EXPERIMENT_PROTOCOL.md before
+requesting execution approval.

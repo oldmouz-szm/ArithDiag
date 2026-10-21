@@ -9,6 +9,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from arithdiag.hitting_set import (
+    FAST_MASTER,
     greedy_packing_bound,
     has_hitting_set_at_most,
     improve_bound,
@@ -29,8 +30,12 @@ def main():
     assert greedy_packing_bound(triangle) == 1
     result = improve_bound(triangle, 1, target_upper=2)
     assert result["lower_bound"] == 2 and result["exact"]
-    assert result["checked_up_to"] == 1
-    assert result["evidence"] == "completed_hitting_set_refutation"
+    if FAST_MASTER:
+        assert result["checked_up_to"] is None
+        assert result["evidence"] == "exact_rational_conflict_packing"
+    else:
+        assert result["checked_up_to"] == 1
+        assert result["evidence"] == "completed_hitting_set_refutation"
     assert has_hitting_set_at_most(triangle, 1)["status"] == "UNSAT"
     assert has_hitting_set_at_most(triangle, 2)["status"] == "SAT"
 
@@ -49,13 +54,22 @@ def main():
         result = has_hitting_set_at_most(triangle, 1, **limits)
         assert result["status"] == "UNKNOWN" and not result["complete"]
         result = improve_bound(triangle, 1, **limits)
-        assert result["lower_bound"] == 1
-        assert result["last_status"] == "UNKNOWN" and not result["exact"]
+        if FAST_MASTER and "max_nodes" in limits:
+            # The branch budget is zero, but an exact integer dual certificate
+            # still proves 2. Exhaustive truth above independently confirms it.
+            assert result["lower_bound"] == 2 and result["exact"]
+            assert result["nodes"] == 0
+        else:
+            assert result["lower_bound"] == 1
+            assert result["last_status"] == "UNKNOWN" and not result["exact"]
 
     # A found auxiliary cover with cost 3 must never be promoted to a lower bound
     # when a smaller cover may exist and no refutation has completed.
     result = improve_bound(triangle, 0, target_upper=1)
-    assert result["lower_bound"] == 1 and not result["exact"]
+    if FAST_MASTER:
+        assert result["lower_bound"] == 2 and result["exact"]
+    else:
+        assert result["lower_bound"] == 1 and not result["exact"]
     assert result["nodes"] == 0
 
     # External circuit bounds can exceed the conflict-only optimum.  Preserve the

@@ -1,8 +1,8 @@
-# Independent semantic-model refactor
+# Common conditional model and backend representations
 
-This independent version descends from frozen v0.2.0, commit
-7160ec30d267055b3272927e59ce255d939c596b. Existing code and experiment results
-are retained separately. It is not a rerun or replacement of the frozen cohort.
+This contract applies to v0.5.0. The conditional-model refactor originally
+descended from v0.2.0 (`7160ec30d267055b3272927e59ce255d939c596b`). Historical
+sources and results remain archived; the current release is a new source snapshot.
 
 ## Backend-neutral contract
 
@@ -33,11 +33,12 @@ radix-256 digit products, carries and indicators. Its input audit checks the
 semantic contract directly, with no intermediate Big-M guard construction.
 The native numerical-report policy remains unchanged.
 
-## Preserved algorithm policy
+## Current algorithm policy
 
 Initialization, proof premises, bounded arithmetic repair, conflict learning,
-proof quotas, backend scheduling, LS joint moves, restarts, and deadlines retain
-the frozen policy. New conflicts are not dynamically injected into either
+LS joint moves, restarts and deadlines share the same implementation across
+backends. v0.5.0 uses the documented interleaved50 policy and the relational,
+resumable internal engine described in PROOF_ENGINE.md. New conflicts are not dynamically injected into either
 backend. All variants use original-integer witness validation. Source/model
 statistics change their meaning: a semantic component contributes one
 conditional row, while LS later creates up to two guarded rows. Variable and

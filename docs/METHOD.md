@@ -87,7 +87,9 @@ division and factor-pair proposals, joint signal modifications, wiring repair an
 health recomputation. Exhaustive small factor ranges are limited to 4096;
 large divisor scans to 20000. A bounded scan never proves absence of factors.
 Stagnation restarts use 3 seconds without improvement and round caps of 5, 10 and
-15 seconds. Internal proof pauses native search so both share one assigned CPU.
+15 seconds. With interleaved50, internal work runs after the native round has
+ended, so internal work does not consume a paused LS round's clock. The optional
+legacy fraction50 policy retains within-round pauses. Both are single-core policies.
 All rounds, audits and validation share the whole-process deadline.
 
 ## What a certificate means

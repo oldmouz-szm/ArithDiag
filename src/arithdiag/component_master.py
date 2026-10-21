@@ -8,6 +8,7 @@ No circuit diagnosis, negative oracle answer or UNSAT is inferred from a cover.
 from collections import OrderedDict, defaultdict
 import time
 from arithdiag import hitting_set as h
+from arithdiag import resumable_master
 
 ORIGINAL_IMPROVE = h.improve_bound
 ORIGINAL_DECIDE = h.has_hitting_set_at_most
@@ -89,11 +90,14 @@ def optimize(parts, deadline, max_nodes):
             continue
         left = (deadline - time.monotonic()) if deadline is not None else 1.0
         portion = min(left, max(0.003, left / (len(parts) - i)))
-        row = ORIGINAL_IMPROVE(
+        captured = []
+        options = {"on_candidate": captured.append} if h.FAST_MASTER else {}
+        row = resumable_master.improve(
             part,
             current_lower=s["lower"],
             deadline=time.monotonic() + portion,
             max_nodes=max_nodes,
+            **options,
         )
         METRICS["part_solves"] += 1
         nodes += row["nodes"]
@@ -101,6 +105,13 @@ def optimize(parts, deadline, max_nodes):
         if row["auxiliary_upper_bound"] is not None:
             s["upper"] = min(s["upper"], row["auxiliary_upper_bound"])
         s["exact"] = s["lower"] == s["upper"]
+        if s["cover"] is not None and len(s["cover"]) > s["upper"]:
+            s["cover"] = None
+        for cover in captured:
+            if len(cover) <= s["upper"]:
+                if any(not cover.intersection(edge) for edge in part):
+                    raise ValueError("Cached auxiliary cover fails its exact conflict family")
+                s["cover"] = cover
     METRICS["part_nodes"] += nodes
     return states, nodes
 

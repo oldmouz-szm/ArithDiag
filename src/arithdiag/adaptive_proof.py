@@ -14,6 +14,8 @@ import time
 from arithdiag.hitting_set import has_hitting_set_at_most
 from arithdiag.conflicts import explain_conflict
 from arithdiag.proof import ProofDriver
+from arithdiag.relation_conflicts import explain_relations
+from arithdiag.resumable_master import greedy_proposal
 
 
 class AdaptiveIHSDriver(ProofDriver):
@@ -52,6 +54,9 @@ class AdaptiveIHSDriver(ProofDriver):
             ihs_last_target_k=None,
             ihs_last_master_status=None,
             proof_backend="adaptive_internal_integer_conflicts_and_hitting_sets",
+            cover_proposals=0,
+            proposal_conflicts=0,
+            master_reserved_checks=0,
         )
 
     def available_budget(self, requested_s):
@@ -112,6 +117,7 @@ class AdaptiveIHSDriver(ProofDriver):
             while accepted_lower < upper and time.monotonic() < deadline:
                 # Start at the reliable current bound, so large gaps make
                 # incremental progress. A completed UNSAT raises it by one.
+                # Preserve the frozen lower-guided assumption search.
                 k = accepted_lower
                 key = (frozenset(self.conflicts), k)
                 attempts = self._retry_state(key)
@@ -132,10 +138,15 @@ class AdaptiveIHSDriver(ProofDriver):
                     edges = edges[offset:] + edges[:offset]
                     self.rotation += 1
                 tick = time.monotonic()
+                # A cover search cannot monopolize the whole remaining grant.
+                # UNKNOWN retains its resumable state; a larger cover below U
+                # may still propose a health query without proving the k goal.
+                master_deadline=min(deadline,tick+max(0.003,(deadline-tick)*0.5))
+                self.metrics['master_reserved_checks']+=1
                 row = has_hitting_set_at_most(
                     edges,
                     k,
-                    deadline=deadline,
+                    deadline=master_deadline,
                     max_nodes=200000,
                     on_candidate=captured.append,
                 )
@@ -149,11 +160,14 @@ class AdaptiveIHSDriver(ProofDriver):
                     self.metrics["ihs_refuted_cardinality_queries"] += 1
                     accepted_lower = max(accepted_lower, k + 1)
                     continue
+                proposal_mode=False
                 if row["status"] != "SAT" or not captured:
-                    # A timeout/node cap can be retried with future quota.
-                    break
-                faulty = captured[0]
-                if len(faulty) > k or not faulty <= set(self.components):
+                    faulty=greedy_proposal(self.conflicts,upper-1,
+                        deadline=min(deadline,time.monotonic()+0.02))
+                    if faulty is None:break
+                    proposal_mode=True;self.metrics['cover_proposals']+=1
+                else:faulty=captured[0]
+                if (not proposal_mode and len(faulty)>k) or not faulty <= set(self.components):
                     raise ValueError("Invalid transient hitting-set candidate")
                 if any(not faulty.intersection(core) for core in self.conflicts):
                     raise ValueError("Transient candidate fails a proved conflict")
@@ -163,13 +177,20 @@ class AdaptiveIHSDriver(ProofDriver):
                     self.metrics["adaptive_round_limit_max"], rounds
                 )
                 tick = time.monotonic()
+                relation_allowance=min(0.05,max(0.,deadline-tick)*0.25)
+                extra=explain_relations(self.model,assumed_healthy,
+                    deadline=time.perf_counter()+relation_allowance,max_rounds=rounds)
+                interval_allowance=max(0.,deadline-time.monotonic())
+                if extra is not None:interval_allowance=min(interval_allowance,0.05)
                 core = explain_conflict(
                     self.model,
                     assumed_healthy,
                     deadline=time.perf_counter()
-                    + max(0.0, deadline - time.monotonic()),
+                    + interval_allowance,
                     max_rounds=rounds,
                 )
+                if core is None:
+                    core, extra = extra, None
                 self.metrics["ihs_integer_s"] += time.monotonic() - tick
                 self.metrics["ihs_integer_checks"] += 1
                 if time.monotonic() >= deadline:
@@ -184,9 +205,15 @@ class AdaptiveIHSDriver(ProofDriver):
                 if not self._add(core):
                     raise ValueError("Refuted candidate did not produce a new conflict")
                 self.metrics["ihs_new_conflicts"] += 1
+                if proposal_mode:self.metrics['proposal_conflicts']+=1
+                if extra is not None:
+                    if not extra <= assumed_healthy or faulty.intersection(extra):
+                        raise ValueError("Additional conflict depends on a relaxed component")
+                    if self._add(extra):
+                        self.metrics["ihs_new_conflicts"] += 1
                 # Rebuild immediately: strengthening an old conflict can change
                 # packing even before another integer health query is made.
-                candidate_lower = self._master(accepted_lower, upper, deadline)
+                candidate_lower = self._master(accepted_lower, upper, min(deadline, time.monotonic()+0.25))
                 if time.monotonic() >= deadline:
                     break
                 accepted_lower = candidate_lower

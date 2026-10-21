@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 import json
 import sys
 
@@ -9,10 +10,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from arithdiag import internal_budget as mod
 
+with patch.dict("os.environ", {}, clear=True):
+    assert mod.selected_policy() == "interleaved50"
+with patch.dict("os.environ", {"ARITHDIAG_INTERNAL_BUDGET_POLICY": "fraction50"}):
+    assert mod.selected_policy() == "fraction50"
+
 real_time = mod.time
 count = 0
 try:
-    for policy in mod.POLICIES:
+    for policy in ("fraction50",):
         for remaining in (120.0, 7.0, 0.0):
             for early in (False, True):
                 tick = [100.0]
@@ -50,7 +56,7 @@ try:
                     tick[0] += 5
                     assert abs(driver.available_budget(1000) - min(expected - spent, max(0, 100 + remaining - tick[0] - 0.03))) < 1e-8
                 count += 1
-    for policy in mod.POLICIES:
+    for policy in ("fraction50",):
         tick = [100.0]
         mod.time = SimpleNamespace(perf_counter=lambda: tick[0])
         driver = SimpleNamespace(metrics={"proof_strengthening_s": 0.0}, proof_cap_s=48.0)

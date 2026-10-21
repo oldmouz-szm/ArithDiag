@@ -23,12 +23,18 @@ checks = [
         "check_release.py",
         "check_semantic_ir.py",
         "check_internal_budget.py",
+        "check_schedule.py",
         "check_g_encoding_offline.py",
         "check_correctness.py",
         "check_proof_policy.py",
         "check_hitting_bound.py",
         "check_hitting_candidate.py",
         "check_runner.py",
+        "check_relations.py",
+        "check_resumable.py",
+        "check_master.py",
+        "check_affine.py",
+        "check_discovery_reserve.py",
     ]
 ]
 checks += [("check_proof_policy.py", ["--variant", variant])
@@ -46,10 +52,12 @@ if args.gurobi:
         ("check_cli.py", ["--backend", "ArithDiag-G"]),
     ]
 for check, flags in checks:
+    print("Running " + check + (" " + " ".join(flags) if flags else ""), flush=True)
     subprocess.run(
         [sys.executable, "-B", str(ROOT / "tests" / check), *flags],
         cwd=ROOT,
-        env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONHASHSEED="0"),
+        env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONHASHSEED="0",
+                 ARITHDIAG_INTERNAL_BUDGET_POLICY="interleaved50", ARITHDIAG_VARIANT="full"),
         check=True,
     )
 print("All selected ArithDiag checks passed.")

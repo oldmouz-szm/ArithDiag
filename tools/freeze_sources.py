@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Create a source-only integrity manifest after a reviewed source change."""
 from pathlib import Path
+import ast
 import hashlib
 import json
 
@@ -33,9 +34,16 @@ for path in ROOT.rglob("*"):
         continue
     if path.suffix in INCLUDED or path.name in NAMES:
         paths.append(path)
+version_tree = ast.parse((ROOT / "src/arithdiag/__init__.py").read_text(encoding="utf-8"))
+version = next(
+    ast.literal_eval(node.value)
+    for node in version_tree.body
+    if isinstance(node, ast.Assign)
+    and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
+)
 manifest = dict(
     schema="arithdiag-source-v1",
-    version="0.4.0",
+    version=version,
     files={
         str(p.relative_to(ROOT))
         .replace("\\", "/"): hashlib.sha256(p.read_bytes())

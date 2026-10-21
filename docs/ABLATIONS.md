@@ -40,7 +40,7 @@ It can still finish on a verified initialized U equal to the common basic L.
 It is not a raw-LS baseline; label it 'without active internal search and proof
 enhancement, after common preparation'. Never call it 'without initialization'.
 
-Initial/later internal time shares one nonrenewing fraction50 ledger; released
+Initial/later internal time shares one nonrenewing interleaved50 ledger; released
 budget is available to remaining work. All variants use fresh worker processes,
 record actual flags in the manifest, and reject resume configuration drift.
 The G adapter exposes full only; ablations isolate the main LS configuration.

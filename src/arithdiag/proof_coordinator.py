@@ -104,4 +104,7 @@ class ProofCoordinator:
         return self.lower
 
     def telemetry(self):
-        return dict(self.driver.metrics, **self.metrics)
+        from arithdiag.affine_conflicts import METRICS as AFFINE
+        from arithdiag.relation_conflicts import METRICS as RELATION
+        from arithdiag.resumable_master import METRICS as RESUME
+        return dict(self.driver.metrics, **self.metrics, **AFFINE, **RELATION, **RESUME)

@@ -1,6 +1,7 @@
 # Final experiment protocol (frozen; execution awaiting approval)
 
-Source: ArithDiag v0.4.0. Main method: ArithDiag-LS/full. Optional replacement:
+Source: ArithDiag v0.5.0, whose SOURCE_MANIFEST.json and Git tag lock the source.
+No formal runs are started by preparing this release or executing fixture regressions. Main method: ArithDiag-LS/full. Optional replacement:
 ArithDiag-G/full. This file specifies future experiments and contains no claim
 that they have been run. Historical development records stay separately archived.
 
@@ -12,8 +13,27 @@ cardinality. Do not conflate inclusion-minimality and minimum cardinality.
 Connection, slice, width and observation constraints always hold. Injected locations
 are analysis metadata only, never input to initialization, constraints or stopping.
 
-Use all 594 frozen tasks: 450 original and 144 supplementary observations, 18
-circuit families. Before execution freeze exact dataset commits, full instance
+Use all 576 tasks from **ArithDiag-Final576-v1**, MBD-Benchmark tag **v2.0.0**,
+commit **eec655263e3c388211e75b8cc4e69b78396a6c37**, directory **final576_v1**.
+There are 36 circuits and 192 permanent physical fault configurations, each with
+three independently solved observations. Integer and bit files are mirrors.
+
+| Source portion | Observations | Physical configurations |
+| --- | ---: | ---: |
+| Original circuits | 180 | 60 |
+| First supplement | 72 | 24 |
+| Medium extension | 162 | 54 |
+| Stress extension | 162 | 54 |
+| Total | 576 | 192 |
+
+The source pool had 918 tasks. The original/first-supplement portions were reduced
+using symmetric historical complete-process runtimes, with whole fault groups,
+fault-level coverage and recipe balance. The medium/stress portions were retained
+in full. This is a disclosed performance-informed development selection, not an
+unseen or runtime-independent sample. Publish the selection manifest and exclude
+lists from the benchmark release; do not claim unbiased all-pool performance.
+Retained IDs can have gaps; use final576_v1/instances.json, not the repository's
+legacy root or all_instances.json. Before execution freeze exact dataset commits, full instance
 list, file hashes and physical-fault grouping. Keep correlated observations and
 seeds within their physical fault group during resampling. Report both datasets
 and every family, including residual unknown-factor products and search group size.
@@ -23,7 +43,7 @@ These datasets have been used during development; do not call them an unseen tes
 
 | Method | Fixed implementation policy | Repetitions |
 | --- | --- | --- |
-| ArithDiag-LS | full, fraction50, adapted LS | Seeds 1,2,3 |
+| ArithDiag-LS | full, interleaved50, adapted LS | Seeds 1,2,3 |
 | BE-RC2 | Basic component encoding, unit soft !AB, DOE=false; official RC2/Glucose3 | Once if deterministic |
 | SATbD-C | Faithful paper-flow component adaptation; BEE2017, CryptoMiniSat2.5.1 | Once if deterministic |
 | SMT-Int | Integer semantics and native Optimize; no binary cardinality search | Once if deterministic |
@@ -40,12 +60,12 @@ state the component adaptation and exact-version reconstruction limits.
 
 Do not include baseline implementation code in this source release. Validate all
 baseline candidates against original circuit semantics in the external controller.
-Optional ArithDiag-G replacement uses the same 594 tasks, seeds 1,2,3 and common
+Optional ArithDiag-G replacement uses the same 576 tasks, seeds 1,2,3 and common
 policy. Its encoding differs by design; compare whole backend configurations.
 
 ## Minimal main-paper ablations
 
-Use full and the three variants in ABLATIONS.md, seeds 1,2,3 on all 594 tasks.
+Use full and the three variants in ABLATIONS.md, seeds 1,2,3 on all 576 tasks.
 They respectively remove active internal search, proof enhancement, or both.
 Preprocessing, initialization, static conflicts/basic bounds and adapted LS stay
 common. No structural ablation is required for the main table; preserve the prior
@@ -55,7 +75,10 @@ dominance evaluation as supporting evidence, without pooling it into this batch.
 
 Primary: 120 seconds end-to-end per method/instance/seed. Checkpoints 1,5,10,30,60,
 120 seconds are extracted from the same verified improvement trajectory.
-The fraction50 policy is frozen (see INTERNAL_BUDGET.md), not retuned per instance.
+The interleaved50 policy is frozen (see INTERNAL_BUDGET.md), not retuned per instance. The initial internal request is capped at 5 s; initial
+and later work share a nonrenewing 50% cap. LS-side internal work runs between
+native rounds with earned credit and the existing stagnation advance. An explicit
+fraction50 compatibility run is a different configuration, outside the main table.
 Early exit only on an internally established optimum or valid native completion.
 External reference optima are never available to any worker.
 
@@ -78,7 +101,7 @@ actual gaps and overshoot. These limits are resource conditions of the conclusio
 not a continuously enforced RSS/cgroup cap. Record memory termination separately
 from timeout/error and retain any earlier valid candidate.
 
-Budget robustness: independently run ArithDiag-LS/full and BE-RC2 on all 594 tasks
+Budget robustness: independently run ArithDiag-LS/full and BE-RC2 on all 576 tasks
 with 300 seconds, seed 1. Do not substitute the 120-second checkpoints of these
 runs for the primary 120-second experiment, because the internal fraction depends
 on the total budget. No unapproved execution is started by this protocol.

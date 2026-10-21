@@ -2,7 +2,7 @@
 
 ArithDiag-LS is the main method. ArithDiag-G is the optional replacement adapter.
 Both invoke the same conditional arithmetic model, preprocessing, initialization,
-internal search/proof, fraction50 ledger and original-model checker.
+internal search/proof, interleaved50 ledger and original-model checker.
 
 LS compiles Big-M constraints only at backend handoff, audits the native input,
 and retains adapted arithmetic proposals and restarts. G compiles integer radix

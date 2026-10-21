@@ -22,6 +22,8 @@ Use private environments. Keep default host memory protection at 2 GiB, with
 2.5 GiB required before worker startup. Preserve single-thread workers, exclusive
 configured CPUs, process-group RSS monitoring and interruption/recovery journals.
 
-The v0.4.0 final-test protocol is docs/EXPERIMENT_PROTOCOL.md. Keep the four LS
-variants in docs/ABLATIONS.md and fraction50 budget fixed. Formal experiments
+The v0.5.0 final-test protocol is docs/EXPERIMENT_PROTOCOL.md. Keep the four LS
+variants in docs/ABLATIONS.md and interleaved50 production budget fixed. The
+dataset is ArithDiag-Final576-v1 at MBD-Benchmark v2.0.0, directory final576_v1;
+legacy fraction50 remains an explicit compatibility policy, not the final protocol. Formal experiments
 require separate user approval; correctness/fixture regressions do not start them.

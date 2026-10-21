@@ -18,7 +18,7 @@ from arithdiag.preprocessing import (
     learn_conflicts,
 )
 from arithdiag.proof_coordinator import ProofCoordinator
-from arithdiag.internal_budget import selected_policy, policy_configuration, run_initial
+from arithdiag.internal_budget import selected_policy, policy_configuration, run_initial, borrow_remaining
 from arithdiag.variants import configuration as variant_configuration
 from native_adapter import run_backend
 
@@ -28,6 +28,16 @@ def configuration():
     features = variant_configuration()
     return dict(
         backend="adapted_LS-IQCQP",
+        advance_unused_credit_after_native_stagnation=allocation["budget_policy"] == "interleaved50",
+        ihs_target="certified_current_lower_bound",
+        preserve_primary_integer_conflicts=True,
+        exact_signed_affine_square_conflicts=True,
+        explained_shared_product_relations=True,
+        relation_query_max_s=0.05,
+        relation_query_fraction=0.25,
+        master_slice_fraction=0.5,
+        unknown_master_cover_proposals=True,
+        proof_master_optimization="resumable_exact_family_and_rational_packing",
         internal_policy="component_guided",
         common_model="conditional_arithmetic_v2",
         structural=True,
@@ -36,12 +46,13 @@ def configuration():
         joint_native_model=True,
         initial_refinement_limit_s=0.35 if features["internal_proof_enhancement"] else 0.0,
         pre_encoding_proof_request_s=allocation["initial_request_s"],
-        proof_request_s=0.75,
-        proof_interval_s=1.0,
+        proof_request_s=None if allocation["budget_policy"] == "interleaved50" else 0.75,
+        proof_interval_s=None if allocation["budget_policy"] == "interleaved50" else 1.0,
+        proof_callback_placement="between_native_rounds" if allocation["budget_policy"] == "interleaved50" else "within_native_rounds",
         native_actions=True,
         native_restarts_s=[5, 10, 15],
         stagnation_s=3.0,
-        pause_native_during_internal_proof=features["internal_callbacks"],
+        pause_native_during_internal_proof=features["internal_callbacks"] and allocation["budget_policy"] != "interleaved50",
         dynamic_proved_cuts=False,
         initial_static_cones_only=True,
         external_reference_input=False,
@@ -170,6 +181,11 @@ def main():
         if now() < limit:
             internal[0] = max(internal[0], value)
             lower(internal[0], "certified_internal_integer_bound")
+
+    def strengthen_after_stagnation():
+        if coop is not None:
+            borrow_remaining(coop, deadline, strengthen)
+    strengthen.after_stagnation = strengthen_after_stagnation
 
     try:
         t = time.perf_counter()

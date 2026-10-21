@@ -169,6 +169,7 @@ def run_backend(
                     why = "native_exit"
                     break
                 if (result["configuration"].get("internal_callbacks", True)
+                    and result["configuration"].get("budget_policy") != "interleaved50"
                     and time.perf_counter() - last_proof >= 1.0 and best[2] is not None):
                     tick = time.perf_counter()
                     before = best[1]
@@ -237,3 +238,19 @@ def run_backend(
         publish()
         if stop:
             return
+        if (result["configuration"].get("budget_policy") == "interleaved50"
+            and result["configuration"].get("internal_callbacks", True)
+            and best[2] is not None and time.perf_counter() < deadline - 0.04):
+            # Proof runs after the native process has ended. It cannot consume
+            # a native round's wall clock or trigger a stagnation restart.
+            tick = time.perf_counter()
+            if why == "stagnation" and hasattr(strengthen, "after_stagnation"):
+                strengthen.after_stagnation()
+            else:
+                strengthen(duration)
+            spent = time.perf_counter() - tick
+            result["between_round_proof_s"] = result.get("between_round_proof_s", 0.0) + spent
+            result["rounds"][-1]["between_round_proof_s"] = spent
+            if certify():
+                return
+            publish()
